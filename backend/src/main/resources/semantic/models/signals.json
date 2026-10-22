@@ -1,0 +1,52 @@
+{
+  "id": "signals",
+  "label": "Signals",
+  "version": 1,
+  "description": "Risk, opportunity, service and market signals detected about clients, with their triage stage.",
+  "collection": "signals",
+  "entity": "clientId",
+  "time": { "field": "detectedAt", "grain": "month", "closedOnly": false },
+  "dimensions": {
+    "signalCategory": "category",
+    "signalType": "type",
+    "severity": "severity",
+    "signalStage": "stage",
+    "signalSource": "source"
+  },
+  "segments": {
+    "active": { "description": "unresolved signals", "where": [{ "field": "stage", "op": "ne", "value": "Resolved" }] },
+    "p1": { "description": "P1 signals", "where": [{ "field": "severity", "op": "eq", "value": "P1" }] },
+    "risk": { "description": "risk signals", "where": [{ "field": "category", "op": "eq", "value": "Risk" }] },
+    "opportunity": { "description": "opportunity signals", "where": [{ "field": "category", "op": "eq", "value": "Opportunity" }] }
+  },
+  "measures": [
+    { "id": "activeSignals", "label": "Active signals", "agg": "count", "segments": ["active"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Unresolved signals (every stage except Resolved)." },
+    { "id": "activeP1Signals", "label": "Active P1 signals", "agg": "count", "segments": ["active", "p1"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Unresolved signals that need action today." },
+    { "id": "riskAtStakeUsd", "label": "Exposure at risk", "agg": "sum", "field": "impactUsd", "segments": ["active", "risk"], "unit": "USD", "polarity": "lowerIsBetter",
+      "description": "Estimated exposure at risk across unresolved risk signals." },
+    { "id": "opportunityPotentialUsd", "label": "Revenue potential", "agg": "sum", "field": "impactUsd", "segments": ["active", "opportunity"], "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Estimated revenue potential across unresolved opportunity signals." },
+    { "id": "signalCount", "label": "Signals", "agg": "count", "unit": "count", "polarity": "neutral",
+      "description": "Number of signals detected." }
+  ],
+  "records": {
+    "key": "signalId",
+    "fields": [
+      { "id": "title", "label": "Signal", "field": "title", "type": "string" },
+      { "id": "subtitle", "label": "Category · type · stage", "type": "string",
+        "expr": { "$concat": ["$category", " · ", "$type", " · ", "$stage"] }, "sources": ["signals.category", "signals.type", "signals.stage"] },
+      { "id": "clientName", "label": "Client", "field": "client.name", "type": "string" },
+      { "id": "category", "label": "Category", "field": "category", "type": "string", "dimension": "signalCategory" },
+      { "id": "type", "label": "Type", "field": "type", "type": "string" },
+      { "id": "severity", "label": "Severity", "field": "severity", "type": "string", "dimension": "severity" },
+      { "id": "stage", "label": "Stage", "field": "stage", "type": "string", "dimension": "signalStage" },
+      { "id": "detectedAt", "label": "Detected", "field": "detectedAt", "type": "date", "unit": "date" },
+      { "id": "impactUsd", "label": "Impact", "field": "impactUsd", "type": "number", "unit": "USD" },
+      { "id": "owner", "label": "Owner", "field": "owner", "type": "string" },
+      { "id": "summary", "label": "Summary", "field": "summary", "type": "string" }
+    ],
+    "defaultSort": [{ "by": "severity", "dir": "asc" }, { "by": "detectedAt", "dir": "desc" }]
+  }
+}

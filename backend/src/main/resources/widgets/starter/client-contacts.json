@@ -1,0 +1,36 @@
+{
+  "id": "client-contacts",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Key contacts",
+  "description": "People at the selected client, primary contact first, with when the coverage team last spoke to them.",
+  "data": {
+    "query": {
+      "kind": "records",
+      "model": "contacts",
+      "fields": [
+        "name",
+        "title",
+        "role",
+        "lastContactDate"
+      ],
+      "scope": "entity"
+    }
+  },
+  "view": {
+    "primitive": "list",
+    "title": "name",
+    "subtitle": "title",
+    "badge": "role",
+    "meta": "lastContactDate"
+  },
+  "layout": {
+    "span": 4
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

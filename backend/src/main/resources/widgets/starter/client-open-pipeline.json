@@ -1,0 +1,30 @@
+{
+  "id": "client-open-pipeline",
+  "specVersion": 2,
+  "version": 4,
+  "title": "Open pipeline",
+  "description": "Expected first-year revenue of open deals, with the number of open deals.",
+  "data": {
+    "query": {
+      "metrics": [
+        "pipelineUsd",
+        "openDeals"
+      ]
+    }
+  },
+  "view": {
+    "primitive": "metric",
+    "value": "pipelineUsd",
+    "secondary": "openDeals",
+    "polarity": "higherIsBetter"
+  },
+  "layout": {
+    "span": 3
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

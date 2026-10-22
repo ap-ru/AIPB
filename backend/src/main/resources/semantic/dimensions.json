@@ -1,0 +1,46 @@
+{
+  "description": "Conformed dimensions: the ways any figure can be broken down or filtered. A dimension means the same thing in every model that binds it, so figures from different models can sit side by side on the same rows (revenue and pipeline by line of business). Models map each dimension to their own fields; time dimensions come from a model's time field.",
+  "version": 1,
+  "dimensions": [
+    { "id": "client", "label": "Client", "type": "string", "description": "The client relationship (clientId), shown by its name.", "displayColumn": "clientName", "displayLabel": "Client" },
+    { "id": "industry", "label": "Industry", "type": "string", "description": "The client's industry sector." },
+    { "id": "region", "label": "Region", "type": "string", "description": "The client's coverage region.", "values": ["AMER", "EMEA", "APAC", "LATAM"] },
+    { "id": "tier", "label": "Tier", "type": "string", "description": "The client's coverage tier.", "values": ["Strategic", "Core", "Growth"] },
+    { "id": "clientSegment", "label": "Client segment", "type": "string", "description": "The line of business that owns coverage of the client.", "values": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
+    { "id": "relationshipManager", "label": "Relationship manager", "type": "string", "description": "The client's relationship manager." },
+    { "id": "rating", "label": "Internal rating", "type": "string", "description": "The client's internal risk rating label.", "values": ["Strong", "Satisfactory", "Acceptable", "Watch", "Substandard"] },
+    { "id": "kycStatus", "label": "KYC status", "type": "string", "description": "Know-your-customer refresh status.", "values": ["Current", "Refresh Due", "Overdue"],
+      "tones": { "Current": "good", "Refresh Due": "warn", "Overdue": "bad" } },
+
+    { "id": "lob", "label": "Line of business", "type": "string", "description": "The line of business a product, holding, deal or revenue belongs to.", "values": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
+    { "id": "product", "label": "Product", "type": "string", "description": "The product (productId), shown by its name.", "displayColumn": "productName", "displayLabel": "Product" },
+    { "id": "productType", "label": "Product type", "type": "string", "description": "The economic type of a product.", "values": ["credit", "deposit", "treasury", "markets", "capital_markets"] },
+    { "id": "holdingStatus", "label": "Holding status", "type": "string", "description": "Status of a holding.", "values": ["Active", "Pending", "Maturing", "Completed"],
+      "tones": { "Active": "good", "Maturing": "warn", "Pending": "info", "Completed": "neutral" } },
+
+    { "id": "dealStage", "label": "Stage", "type": "string", "description": "Sales stage of a deal.", "values": ["Discovery", "Proposal", "Structuring", "Credit Approval", "Documentation", "Closing", "Closed Won", "Closed Lost"] },
+    { "id": "forecastCategory", "label": "Forecast category", "type": "string", "description": "Forecast category of a deal.", "values": ["Commit", "Best Case", "Pipeline", "Closed"] },
+    { "id": "dealRisk", "label": "Deal risk", "type": "string", "description": "Execution risk of a deal.", "values": ["Low", "Medium", "High"],
+      "tones": { "Low": "good", "Medium": "warn", "High": "bad" } },
+    { "id": "dealOwner", "label": "Deal owner", "type": "string", "description": "Banker who owns a deal." },
+
+    { "id": "covenantName", "label": "Covenant", "type": "string", "description": "The covenant test.", "values": ["Max Total Leverage", "Min Interest Coverage", "Min Fixed Charge Coverage", "Min Liquidity", "Max Loan-to-Value", "Min Debt Service Coverage"] },
+    { "id": "covenantStatus", "label": "Covenant status", "type": "string", "description": "Result of a covenant's latest test.", "values": ["Compliant", "Watch", "Breach"],
+      "tones": { "Compliant": "good", "Watch": "warn", "Breach": "bad" } },
+
+    { "id": "signalCategory", "label": "Signal category", "type": "string", "description": "Broad kind of signal.", "values": ["Risk", "Opportunity", "Service", "Market"] },
+    { "id": "signalType", "label": "Signal type", "type": "string", "description": "Specific kind of signal." },
+    { "id": "severity", "label": "Severity", "type": "string", "description": "Signal urgency: P1 act today, P2 this week, P3 informational.", "values": ["P1", "P2", "P3"],
+      "tones": { "P1": "bad", "P2": "warn", "P3": "info" } },
+    { "id": "signalStage", "label": "Signal stage", "type": "string", "description": "Triage stage of a signal.", "values": ["New", "Triaged", "Engaged", "Actioned", "Resolved"] },
+    { "id": "signalSource", "label": "Signal source", "type": "string", "description": "System that raised a signal.", "values": ["Credit monitoring", "Payments flows", "CRM", "Service desk", "News", "Market data"] },
+
+    { "id": "contactRole", "label": "Contact role", "type": "string", "description": "A contact's role in the relationship.", "values": ["Decision Maker", "Treasury", "Finance", "Influencer"],
+      "tones": { "Decision Maker": "info", "Treasury": "neutral", "Finance": "neutral", "Influencer": "neutral" } },
+    { "id": "activityType", "label": "Activity type", "type": "string", "description": "Kind of logged interaction.", "values": ["Meeting", "Call", "Email", "Site Visit", "Credit Review"] },
+
+    { "id": "month", "label": "Month", "type": "date", "grain": "month", "description": "Calendar month of a model's time field." },
+    { "id": "quarter", "label": "Quarter", "type": "date", "grain": "quarter", "description": "Calendar quarter of a model's time field." },
+    { "id": "year", "label": "Year", "type": "date", "grain": "year", "description": "Calendar year of a model's time field." }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "id": "client-open-opportunities",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Open opportunities",
+  "description": "The selected client's open deals, largest expected revenue first (top 15).",
+  "data": {
+    "query": {
+      "kind": "records",
+      "model": "opportunities",
+      "segments": [
+        "open"
+      ],
+      "fields": [
+        "name",
+        "stage",
+        "probability",
+        "expectedRevenueUsd",
+        "closeDate",
+        "owner"
+      ],
+      "limit": 15,
+      "scope": "entity"
+    }
+  },
+  "view": {
+    "primitive": "table",
+    "columns": [
+      "name",
+      "stage",
+      "probability",
+      "expectedRevenueUsd",
+      "closeDate",
+      "owner"
+    ]
+  },
+  "layout": {
+    "span": 8
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

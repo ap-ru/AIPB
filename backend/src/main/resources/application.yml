@@ -1,0 +1,61 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: aipb-backend
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/aipb}
+      auto-index-creation: true
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+aipb:
+  seed:
+    enabled: ${AIPB_SEED:true}
+    reset-on-start: ${AIPB_RESET:false}
+  source:
+    # Source data (MongoDB) is read only through the MongoDB MCP server; every call is pinned to this database.
+    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp}
+    database: ${AIPB_SOURCE_DB:bank}
+    timeout-seconds: ${AIPB_MCP_TIMEOUT:20}
+  assistant:
+    # The widget assistant (com.aipb.assistant). Disabled when no API key is set.
+    api-key: ${ANTHROPIC_API_KEY:}
+    base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+    model: ${AIPB_ASSISTANT_MODEL:claude-opus-5-5}
+    # low | medium | high | xhigh | max per stage; thinking is always on, so effort sets depth, latency and cost
+    effort:
+      intake: ${AIPB_EFFORT_INTAKE:medium}
+      build: ${AIPB_EFFORT_BUILD:medium}
+      review: ${AIPB_EFFORT_REVIEW:medium}
+      present: ${AIPB_EFFORT_PRESENT:medium}
+    max-tokens:
+      intake: 8000
+      build: 32000
+      review: 32000
+      present: 8000
+    # caps that bound every run
+    max-tool-calls: 16
+    max-submits: 4
+    max-present-attempts: 3
+    run-timeout-seconds: 360
+    # USD per million tokens (claude-opus-5-5), for the per-session cost estimate
+    price:
+      input: 4.0
+      output: 20.0
+      cache-read: 0.2
+      cache-write: 5.0
+  cors:
+    allowed-origins: ${AIPB_CORS:http://localhost:3000,http://localhost:5173}
+
+logging:
+  level:
+    com.aipb: INFO

@@ -1,0 +1,25 @@
+{
+  "id": "revenue",
+  "label": "Revenue",
+  "version": 1,
+  "description": "Revenue the bank earned (net interest income plus fees), per holding per closed month. The source of every revenue figure.",
+  "collection": "revenue_monthly",
+  "entity": "clientId",
+  "time": { "field": "month", "grain": "month", "closedOnly": true },
+  "joins": {
+    "product": { "collection": "products", "localField": "productId", "foreignField": "productId" }
+  },
+  "dimensions": {
+    "lob": "lob",
+    "product": { "field": "productId", "display": "product.name" },
+    "productType": "product.productType"
+  },
+  "measures": [
+    { "id": "revenueUsd", "label": "Revenue", "agg": "sum", "field": "totalUsd", "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Revenue booked: net interest income plus fees." },
+    { "id": "niiUsd", "label": "Net interest income", "agg": "sum", "field": "niiUsd", "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Net interest income: spread on loans, margin on deposits." },
+    { "id": "feeUsd", "label": "Fee income", "agg": "sum", "field": "feeUsd", "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Fee income: commitment, arrangement, service, trading, underwriting and advisory fees." }
+  ]
+}

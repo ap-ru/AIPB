@@ -1,0 +1,41 @@
+[ {
+  "purpose" : "Opportunities: pipelineUsd, openDeals, weightedPipelineUsd",
+  "collection" : "opportunities",
+  "pipeline" : [ {
+    "$match" : {
+      "clientId" : {
+        "$eq" : "CL-0001"
+      },
+      "stage" : {
+        "$nin" : [ "Closed Won", "Closed Lost" ]
+      }
+    }
+  }, {
+    "$group" : {
+      "_id" : {
+        "dealStage" : "$stage"
+      },
+      "m0" : {
+        "$sum" : "$expectedRevenueUsd"
+      },
+      "m1" : {
+        "$sum" : 1
+      },
+      "m2" : {
+        "$sum" : {
+          "$multiply" : [ "$expectedRevenueUsd", {
+            "$divide" : [ "$probability", 100 ]
+          } ]
+        }
+      }
+    }
+  }, {
+    "$project" : {
+      "_id" : 0,
+      "dealStage" : "$_id.dealStage",
+      "m0" : 1,
+      "m1" : 1,
+      "m2" : 1
+    }
+  } ]
+} ]

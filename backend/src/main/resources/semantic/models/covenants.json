@@ -1,0 +1,50 @@
+{
+  "id": "covenants",
+  "label": "Covenants",
+  "version": 1,
+  "description": "Financial covenants on credit facilities, with the result of the latest quarterly test.",
+  "collection": "covenants",
+  "entity": "clientId",
+  "time": null,
+  "dates": { "tested": "lastTestDate" },
+  "joins": {
+    "holding": { "collection": "holdings", "localField": "holdingId", "foreignField": "holdingId" }
+  },
+  "dimensions": {
+    "covenantName": "name",
+    "covenantStatus": "status",
+    "lob": "holding.lob",
+    "product": { "field": "holding.productId", "display": "holding.productName" }
+  },
+  "segments": {
+    "breach": { "description": "breached covenants", "where": [{ "field": "status", "op": "eq", "value": "Breach" }] },
+    "watch": { "description": "covenants on watch", "where": [{ "field": "status", "op": "eq", "value": "Watch" }] },
+    "atRisk": { "description": "covenants on watch or breached", "where": [{ "field": "status", "op": "in", "value": ["Watch", "Breach"] }] }
+  },
+  "measures": [
+    { "id": "covenantCount", "label": "Covenants", "agg": "count", "unit": "count", "polarity": "neutral",
+      "description": "Number of covenants." },
+    { "id": "breachedCovenants", "label": "Breached covenants", "agg": "count", "segments": ["breach"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Covenants whose latest test breached the limit." },
+    { "id": "covenantsAtRisk", "label": "Covenants at risk", "agg": "count", "segments": ["atRisk"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Covenants on watch (headroom below 15%) or breached." },
+    { "id": "minHeadroomPct", "label": "Tightest headroom", "agg": "min", "field": "headroomPct", "unit": "percent", "polarity": "higherIsBetter",
+      "description": "The smallest covenant headroom, in percent of the threshold (negative means breached)." }
+  ],
+  "records": {
+    "key": "covenantId",
+    "fields": [
+      { "id": "name", "label": "Covenant", "field": "name", "type": "string", "dimension": "covenantName" },
+      { "id": "facility", "label": "Facility", "field": "holding.productName", "type": "string" },
+      { "id": "metric", "label": "Metric", "field": "metric", "type": "string" },
+      { "id": "operator", "label": "Test", "field": "operator", "type": "string" },
+      { "id": "actual", "label": "Actual", "field": "actual", "type": "number", "unitFrom": { "field": "unit", "map": { "x": "multiple", "%": "percent", "USD": "USD" } } },
+      { "id": "threshold", "label": "Limit", "field": "threshold", "type": "number", "unitFrom": { "field": "unit", "map": { "x": "multiple", "%": "percent", "USD": "USD" } } },
+      { "id": "unit", "label": "Unit", "field": "unit", "type": "string" },
+      { "id": "headroomPct", "label": "Headroom", "field": "headroomPct", "type": "number", "unit": "percent" },
+      { "id": "status", "label": "Status", "field": "status", "type": "string", "dimension": "covenantStatus" },
+      { "id": "lastTestDate", "label": "Last test", "field": "lastTestDate", "type": "date", "unit": "date" }
+    ],
+    "defaultSort": [{ "by": "headroomPct", "dir": "asc" }]
+  }
+}

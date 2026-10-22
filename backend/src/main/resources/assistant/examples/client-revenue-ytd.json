@@ -1,0 +1,144 @@
+{
+  "id": "client-revenue-ytd",
+  "version": 2,
+  "title": "Revenue YTD",
+  "description": "Revenue (NII + fees) booked this calendar year for the selected client, compared with the same months last year.",
+  "params": [
+    {
+      "name": "clientId",
+      "type": "string",
+      "description": "Client key (clients.clientId), e.g. CL-0001"
+    },
+    {
+      "name": "asOfDate",
+      "type": "date",
+      "description": "The dataset's 'today' (built in)"
+    }
+  ],
+  "data": {
+    "collection": "revenue_monthly",
+    "pipeline": [
+      {
+        "$match": {
+          "clientId": {
+            "$param": "clientId"
+          }
+        }
+      },
+      {
+        "$group": {
+          "_id": null,
+          "revenueYtdUsd": {
+            "$sum": {
+              "$cond": [
+                {
+                  "$gte": [
+                    "$month",
+                    {
+                      "$dateTrunc": {
+                        "date": {
+                          "$param": "asOfDate"
+                        },
+                        "unit": "year"
+                      }
+                    }
+                  ]
+                },
+                "$totalUsd",
+                0
+              ]
+            }
+          },
+          "revenuePriorYtdUsd": {
+            "$sum": {
+              "$cond": [
+                {
+                  "$and": [
+                    {
+                      "$gte": [
+                        "$month",
+                        {
+                          "$dateSubtract": {
+                            "startDate": {
+                              "$dateTrunc": {
+                                "date": {
+                                  "$param": "asOfDate"
+                                },
+                                "unit": "year"
+                              }
+                            },
+                            "unit": "year",
+                            "amount": 1
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$lt": [
+                        "$month",
+                        {
+                          "$dateSubtract": {
+                            "startDate": {
+                              "$dateTrunc": {
+                                "date": {
+                                  "$param": "asOfDate"
+                                },
+                                "unit": "month"
+                              }
+                            },
+                            "unit": "year",
+                            "amount": 1
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "$totalUsd",
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "revenueYtdUsd": 1,
+          "revenuePriorYtdUsd": 1
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "revenueYtdUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Revenue YTD"
+      },
+      {
+        "name": "revenuePriorYtdUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Prior YTD"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "metric",
+    "value": "revenueYtdUsd",
+    "compare": "revenuePriorYtdUsd",
+    "polarity": "higherIsBetter"
+  },
+  "layout": {
+    "span": 3
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

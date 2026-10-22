@@ -1,0 +1,58 @@
+{
+  "id": "holdings",
+  "label": "Holdings",
+  "version": 1,
+  "description": "Products each client holds with the bank, with their current amounts as of the data's today.",
+  "collection": "holdings",
+  "entity": "clientId",
+  "time": null,
+  "dates": { "maturity": "maturityDate", "opened": "openedDate" },
+  "dimensions": {
+    "lob": "lob",
+    "product": { "field": "productId", "display": "productName" },
+    "productType": "productType",
+    "holdingStatus": "status"
+  },
+  "segments": {
+    "credit": { "description": "credit facilities", "where": [{ "field": "productType", "op": "eq", "value": "credit" }] },
+    "deposit": { "description": "deposit accounts", "where": [{ "field": "productType", "op": "eq", "value": "deposit" }] },
+    "markets": { "description": "hedging programs", "where": [{ "field": "productType", "op": "eq", "value": "markets" }] },
+    "maturing": { "description": "maturing within 180 days", "where": [{ "field": "status", "op": "eq", "value": "Maturing" }] }
+  },
+  "measures": [
+    { "id": "exposureUsd", "label": "Exposure", "agg": "sum", "field": "drawnUsd", "segments": ["credit"], "unit": "USD", "polarity": "lowerIsBetter",
+      "description": "Credit exposure: drawn balance across credit facilities." },
+    { "id": "committedUsd", "label": "Committed", "agg": "sum", "field": "committedUsd", "segments": ["credit"], "unit": "USD", "polarity": "neutral",
+      "description": "Committed limit across credit facilities." },
+    { "id": "depositsUsd", "label": "Deposits", "agg": "sum", "field": "balanceUsd", "segments": ["deposit"], "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Current deposit balances." },
+    { "id": "depositAccounts", "label": "Deposit accounts", "agg": "count", "segments": ["deposit"], "unit": "count", "polarity": "higherIsBetter",
+      "description": "Number of deposit accounts." },
+    { "id": "creditFacilities", "label": "Credit facilities", "agg": "count", "segments": ["credit"], "unit": "count", "polarity": "neutral",
+      "description": "Number of credit facilities." },
+    { "id": "hedgeNotionalUsd", "label": "Hedge notional", "agg": "sum", "field": "notionalUsd", "segments": ["markets"], "unit": "USD", "polarity": "neutral",
+      "description": "Notional of hedging programs (not a balance-sheet amount)." },
+    { "id": "holdingCount", "label": "Products held", "agg": "count", "unit": "count", "polarity": "higherIsBetter",
+      "description": "Number of product holdings." },
+    { "id": "productsHeld", "label": "Distinct products", "agg": "countDistinct", "field": "productId", "unit": "count", "polarity": "higherIsBetter",
+      "description": "Number of distinct products held." }
+  ],
+  "records": {
+    "key": "holdingId",
+    "fields": [
+      { "id": "productName", "label": "Product", "field": "productName", "type": "string" },
+      { "id": "lob", "label": "LOB", "field": "lob", "type": "string", "dimension": "lob" },
+      { "id": "productType", "label": "Type", "field": "productType", "type": "string", "dimension": "productType" },
+      { "id": "status", "label": "Status", "field": "status", "type": "string", "dimension": "holdingStatus" },
+      { "id": "amountUsd", "label": "Drawn / balance / notional", "type": "number", "unit": "USD",
+        "expr": { "$ifNull": ["$drawnUsd", "$balanceUsd", "$notionalUsd", null] }, "sources": ["holdings.drawnUsd", "holdings.balanceUsd", "holdings.notionalUsd"],
+        "description": "The holding's current amount: drawn balance for credit, balance for deposits, notional for hedges and mandates." },
+      { "id": "committedUsd", "label": "Committed", "field": "committedUsd", "type": "number", "unit": "USD" },
+      { "id": "drawnUsd", "label": "Drawn", "field": "drawnUsd", "type": "number", "unit": "USD" },
+      { "id": "balanceUsd", "label": "Balance", "field": "balanceUsd", "type": "number", "unit": "USD" },
+      { "id": "maturityDate", "label": "Maturity", "field": "maturityDate", "type": "date", "unit": "date" },
+      { "id": "openedDate", "label": "Opened", "field": "openedDate", "type": "date", "unit": "date" }
+    ],
+    "defaultSort": [{ "by": "lob", "dir": "asc" }, { "by": "productName", "dir": "asc" }]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "id": "client-open-pipeline",
+  "version": 2,
+  "title": "Open pipeline",
+  "description": "Expected first-year revenue of the selected client's open deals, with the number of open deals.",
+  "params": [
+    {
+      "name": "clientId",
+      "type": "string",
+      "description": "Client key (clients.clientId), e.g. CL-0001"
+    }
+  ],
+  "data": {
+    "collection": "opportunities",
+    "pipeline": [
+      {
+        "$match": {
+          "clientId": {
+            "$param": "clientId"
+          },
+          "stage": {
+            "$nin": [
+              "Closed Won",
+              "Closed Lost"
+            ]
+          }
+        }
+      },
+      {
+        "$group": {
+          "_id": null,
+          "pipelineUsd": {
+            "$sum": "$expectedRevenueUsd"
+          },
+          "openDeals": {
+            "$sum": 1
+          }
+        }
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "pipelineUsd": 1,
+          "openDeals": 1
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "pipelineUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Open pipeline"
+      },
+      {
+        "name": "openDeals",
+        "type": "number",
+        "unit": "count",
+        "format": "integer",
+        "label": "Open deals"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "metric",
+    "value": "pipelineUsd",
+    "secondary": "openDeals",
+    "polarity": "higherIsBetter"
+  },
+  "layout": {
+    "span": 3
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

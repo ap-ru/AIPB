@@ -1,0 +1,39 @@
+{
+  "id": "book-revenue-by-lob-monthly",
+  "specVersion": 2,
+  "version": 4,
+  "title": "Monthly revenue by line of business",
+  "description": "Revenue (NII + fees) across the whole book, month by month, one line per line of business (the last 24 closed months unless the page sets a period).",
+  "data": {
+    "query": {
+      "metrics": [
+        "revenueUsd"
+      ],
+      "dimensions": [
+        "month",
+        "lob"
+      ],
+      "window": {
+        "type": "trailing",
+        "unit": "month",
+        "n": 24
+      },
+      "scope": "book",
+      "period": "page"
+    }
+  },
+  "view": {
+    "primitive": "line",
+    "x": "month",
+    "y": [
+      "revenueUsd"
+    ],
+    "series": "lob"
+  },
+  "layout": {
+    "span": 12
+  },
+  "provenance": {
+    "author": "starter"
+  }
+}

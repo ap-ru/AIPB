@@ -1,0 +1,26 @@
+{
+  "name": "distinct_values",
+  "strict": false,
+  "description": "Return the distinct values of one field (up to 50, most frequent first, with counts), optionally within a filter. Call it before filtering or grouping on a text field, to use values that really exist (exact spelling and case) - a filter on a value that does not exist silently returns nothing.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "collection": {
+        "type": "string",
+        "description": "A data collection of the bank database (see the data dictionary), e.g. holdings."
+      },
+      "field": {
+        "type": "string",
+        "description": "Field name, e.g. stage or lob."
+      },
+      "filter": {
+        "type": "object",
+        "description": "Optional MongoDB find filter."
+      }
+    },
+    "required": [
+      "collection",
+      "field"
+    ]
+  }
+}

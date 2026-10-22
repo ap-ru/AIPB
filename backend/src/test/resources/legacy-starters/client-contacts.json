@@ -1,0 +1,87 @@
+{
+  "id": "client-contacts",
+  "version": 1,
+  "title": "Key contacts",
+  "description": "People at the selected client, primary contact first, with when the coverage team last spoke to them.",
+  "params": [
+    {
+      "name": "clientId",
+      "type": "string",
+      "description": "Client key (clients.clientId), e.g. CL-0001"
+    }
+  ],
+  "data": {
+    "collection": "contacts",
+    "pipeline": [
+      {
+        "$match": {
+          "clientId": {
+            "$param": "clientId"
+          }
+        }
+      },
+      {
+        "$sort": {
+          "isPrimary": -1,
+          "name": 1
+        }
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "name": 1,
+          "title": 1,
+          "role": 1,
+          "lastContactDate": 1
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "name",
+        "type": "string",
+        "label": "Name"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "label": "Title"
+      },
+      {
+        "name": "role",
+        "type": "string",
+        "format": "badge",
+        "label": "Role",
+        "tones": {
+          "Decision Maker": "info",
+          "Treasury": "neutral",
+          "Finance": "neutral",
+          "Influencer": "neutral"
+        }
+      },
+      {
+        "name": "lastContactDate",
+        "type": "date",
+        "unit": "date",
+        "format": "date",
+        "label": "Last contact"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "list",
+    "title": "name",
+    "subtitle": "title",
+    "badge": "role",
+    "meta": "lastContactDate"
+  },
+  "layout": {
+    "span": 4
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

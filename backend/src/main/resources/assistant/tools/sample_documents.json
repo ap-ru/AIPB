@@ -1,0 +1,32 @@
+{
+  "name": "sample_documents",
+  "strict": false,
+  "description": "Return up to 5 real documents from a collection, optionally filtered and limited to some fields. Call it before relying on a field you have not seen yet - to confirm its exact name, type and shape (e.g. whether it is an array or nested), or to see what typical values look like. Do not use it to compute figures; use run_query for that.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "collection": {
+        "type": "string",
+        "description": "A data collection of the bank database (see the data dictionary), e.g. holdings."
+      },
+      "filter": {
+        "type": "object",
+        "description": "Optional MongoDB find filter, e.g. {\"clientId\": \"CL-0001\"}. Dates must be Extended JSON {\"$date\": \"...\"}."
+      },
+      "fields": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional fields to return (all fields when omitted)."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "1-5, default 3."
+      }
+    },
+    "required": [
+      "collection"
+    ]
+  }
+}

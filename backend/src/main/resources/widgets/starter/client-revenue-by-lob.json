@@ -1,0 +1,39 @@
+{
+  "id": "client-revenue-by-lob",
+  "specVersion": 2,
+  "version": 4,
+  "title": "Revenue by line of business",
+  "description": "Revenue (NII + fees) split by line of business over the period (the last 12 closed months unless the page sets one).",
+  "data": {
+    "query": {
+      "metrics": [
+        "revenueUsd"
+      ],
+      "dimensions": [
+        "lob"
+      ],
+      "window": {
+        "type": "trailing",
+        "unit": "month",
+        "n": 12
+      },
+      "period": "page"
+    }
+  },
+  "view": {
+    "primitive": "composition",
+    "x": "lob",
+    "y": [
+      "revenueUsd"
+    ]
+  },
+  "layout": {
+    "span": 5
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

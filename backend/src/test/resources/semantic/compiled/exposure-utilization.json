@@ -1,0 +1,30 @@
+[ {
+  "purpose" : "Holdings: exposureUsd, committedUsd",
+  "collection" : "holdings",
+  "pipeline" : [ {
+    "$match" : {
+      "clientId" : {
+        "$eq" : "CL-0001"
+      },
+      "productType" : {
+        "$eq" : "credit"
+      }
+    }
+  }, {
+    "$group" : {
+      "_id" : null,
+      "m0" : {
+        "$sum" : "$drawnUsd"
+      },
+      "m1" : {
+        "$sum" : "$committedUsd"
+      }
+    }
+  }, {
+    "$project" : {
+      "_id" : 0,
+      "m0" : 1,
+      "m1" : 1
+    }
+  } ]
+} ]

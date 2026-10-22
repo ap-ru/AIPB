@@ -1,0 +1,447 @@
+{
+  "description": "The design system's widget primitives. A spec picks one primitive, maps its result columns to the primitive's roles and may set a few design intents. Rendering, colors and spacing come from the app; a spec never styles anything - an intent names what matters, the app decides how it looks.",
+  "units": {
+    "USD": {
+      "description": "US dollars.",
+      "formats": [
+        "currency"
+      ]
+    },
+    "ratio": {
+      "description": "A fraction 0-1 (0.44 means 44%).",
+      "formats": [
+        "percent"
+      ]
+    },
+    "percent": {
+      "description": "Already in percent, 0-100 (44 means 44%).",
+      "formats": [
+        "percentPoints"
+      ]
+    },
+    "count": {
+      "description": "A count of things.",
+      "formats": [
+        "integer",
+        "number"
+      ]
+    },
+    "date": {
+      "description": "A date.",
+      "formats": [
+        "date"
+      ]
+    },
+    "none": {
+      "description": "No unit.",
+      "formats": [
+        "text",
+        "number",
+        "integer",
+        "badge",
+        "date",
+        "boolean"
+      ]
+    },
+    "multiple": {
+      "description": "A multiple, e.g. leverage 3.2x.",
+      "formats": [
+        "multiple"
+      ]
+    },
+    "days": {
+      "description": "A number of days.",
+      "formats": [
+        "days",
+        "integer"
+      ]
+    }
+  },
+  "formats": {
+    "text": {
+      "types": [
+        "string"
+      ],
+      "description": "Plain text."
+    },
+    "number": {
+      "types": [
+        "number"
+      ],
+      "description": "Number with grouping, up to 2 decimals."
+    },
+    "integer": {
+      "types": [
+        "number"
+      ],
+      "description": "Whole number with grouping."
+    },
+    "currency": {
+      "types": [
+        "number"
+      ],
+      "description": "Compact USD: $1.2M, $850K."
+    },
+    "percent": {
+      "types": [
+        "number"
+      ],
+      "description": "A 0-1 ratio shown as a percent."
+    },
+    "percentPoints": {
+      "types": [
+        "number"
+      ],
+      "description": "A 0-100 value shown as a percent."
+    },
+    "date": {
+      "types": [
+        "date"
+      ],
+      "description": "Short date, e.g. Oct 16, 2026. A column with a grain shows its period instead: Sep 2026, 2026 Q3, 2026."
+    },
+    "badge": {
+      "types": [
+        "string"
+      ],
+      "description": "A colored tag; tones map values to good | warn | bad | info | neutral."
+    },
+    "multiple": {
+      "types": [
+        "number"
+      ],
+      "description": "A multiple: 3.25x."
+    },
+    "days": {
+      "types": [
+        "number"
+      ],
+      "description": "Whole days: 45 days."
+    },
+    "boolean": {
+      "types": [
+        "boolean"
+      ],
+      "description": "Yes / No."
+    }
+  },
+  "builtinParams": {
+    "asOfDate": {
+      "type": "date",
+      "description": "The dataset's 'today' (_meta.asOfDate). Declare it and use {\"$param\": \"asOfDate\"} for YTD, trailing-12-month and 'last N quarters' logic. Never use $$NOW."
+    }
+  },
+  "intents": {
+    "emphasis": "Which mark the eye goes to: latest (the most recent period - trends), max or min (the leader or laggard - rankings), none (all marks equal - when no single row is the story). The emphasized mark keeps the accent color and carries its value; the rest are muted.",
+    "polarity": "Whether a rise is good: higherIsBetter (revenue, deposits, pipeline, headroom), lowerIsBetter (utilization, exposure at risk, overdue items, risk signals), neutral (no judgement). Colors every change: a rise that is bad shows red.",
+    "headline": "The figure a bar or line card leads with, computed from the rows by the app: latest (last period, with its change vs the one before), total (sum over the rows - only for additive units USD and count), average, change (last vs first), none.",
+    "reference": "A numeric column drawn as a limit, target or maximum, in the same unit as the values it is compared with (e.g. committedUsd behind drawnUsd)."
+  },
+  "primitives": {
+    "metric": {
+      "description": "One headline number, optionally compared with another (shown as a % change, colored by polarity) and with a secondary figure underneath. With x, a short history: the last row is the value, the row before is the comparison, and every row draws a sparkline.",
+      "roles": {
+        "value": {
+          "required": true,
+          "types": [
+            "number"
+          ]
+        },
+        "compare": {
+          "types": [
+            "number"
+          ],
+          "description": "Prior-period value; the change vs value is shown as a percent."
+        },
+        "secondary": {
+          "types": [
+            "number",
+            "string"
+          ],
+          "description": "A supporting figure shown under the value with its column label."
+        },
+        "x": {
+          "types": [
+            "date"
+          ],
+          "description": "Set it to show a sparkline: the period of each row, ascending."
+        }
+      },
+      "options": {
+        "polarity": [
+          "higherIsBetter",
+          "lowerIsBetter",
+          "neutral"
+        ]
+      },
+      "rows": {
+        "min": 1,
+        "max": 1
+      },
+      "rowsWithX": {
+        "min": 2,
+        "max": 36
+      },
+      "defaultSpan": 3,
+      "guidance": "Use for a single KPI. Without x the pipeline ends in exactly one row ($group with _id: null). With x it returns one row per period (12 closed months is typical), sorted ascending - only when the data was built that way."
+    },
+    "meter": {
+      "description": "A value against its maximum, as a progress bar: utilization of a limit, share of wallet, covenant headroom. With x, one labelled meter per row.",
+      "roles": {
+        "value": {
+          "required": true,
+          "types": [
+            "number"
+          ]
+        },
+        "reference": {
+          "types": [
+            "number"
+          ],
+          "description": "The maximum (a limit or total, same unit as value). Leave it out when value is a 0-1 ratio."
+        },
+        "secondary": {
+          "types": [
+            "number",
+            "string"
+          ],
+          "description": "A supporting figure under the bar (single meter only)."
+        },
+        "x": {
+          "types": [
+            "string"
+          ],
+          "description": "Row label, for one meter per row (e.g. per facility)."
+        }
+      },
+      "options": {
+        "polarity": [
+          "higherIsBetter",
+          "lowerIsBetter",
+          "neutral"
+        ],
+        "warnAt": "number 0-1: the fraction of the maximum where the bar turns to warning (at or above it for lowerIsBetter, at or below for higherIsBetter)"
+      },
+      "rows": {
+        "min": 1,
+        "max": 1
+      },
+      "rowsWithX": {
+        "min": 1,
+        "max": 12
+      },
+      "defaultSpan": 3,
+      "guidance": "Use when the question is 'how much of the limit / the whole is used'. value is a ratio (unit ratio) or has a reference in the same unit. Set polarity and warnAt when a level is a concern (utilization: lowerIsBetter, warnAt 0.8)."
+    },
+    "bar": {
+      "description": "Compare a number across categories, or across a handful of periods. One horizontal series is drawn as a ranked bar list.",
+      "roles": {
+        "x": {
+          "required": true,
+          "types": [
+            "string",
+            "date"
+          ],
+          "description": "Category (or period label)."
+        },
+        "y": {
+          "required": true,
+          "many": true,
+          "types": [
+            "number"
+          ],
+          "description": "One or more series, all in the same unit."
+        },
+        "reference": {
+          "types": [
+            "number"
+          ],
+          "description": "A limit or target per row, same unit as y, drawn as a dashed mark."
+        },
+        "series": {
+          "types": [
+            "string"
+          ],
+          "description": "Long-format rows: one series per value of this column (e.g. one line per line of business), with exactly one y column. The renderer pivots them; at most 4 series."
+        }
+      },
+      "options": {
+        "orientation": [
+          "vertical",
+          "horizontal"
+        ],
+        "stacked": "boolean",
+        "emphasis": [
+          "latest",
+          "max",
+          "min",
+          "none"
+        ],
+        "polarity": [
+          "higherIsBetter",
+          "lowerIsBetter",
+          "neutral"
+        ],
+        "headline": [
+          "latest",
+          "total",
+          "average",
+          "change",
+          "none"
+        ]
+      },
+      "rows": {
+        "min": 1,
+        "warn": 20,
+        "max": 50
+      },
+      "defaultSpan": 6,
+      "guidance": "Use horizontal for long category names and rankings. Sort the rows in the pipeline; the chart keeps their order. Prefer line for long time series. Periods: emphasis latest and a headline. Rankings: emphasis max (or none). Emphasis and headline apply to the first series."
+    },
+    "line": {
+      "description": "Show how numbers move over time. One series is drawn over a soft area with its latest value labelled.",
+      "roles": {
+        "x": {
+          "required": true,
+          "types": [
+            "date"
+          ],
+          "description": "The period (a date), ascending."
+        },
+        "y": {
+          "required": true,
+          "many": true,
+          "types": [
+            "number"
+          ],
+          "description": "One or more series, all in the same unit."
+        },
+        "reference": {
+          "types": [
+            "number"
+          ],
+          "description": "A limit or target per period, same unit as y, drawn as a dashed line."
+        },
+        "series": {
+          "types": [
+            "string"
+          ],
+          "description": "Long-format rows: one series per value of this column (e.g. one line per line of business), with exactly one y column. The renderer pivots them; at most 4 series."
+        }
+      },
+      "options": {
+        "emphasis": [
+          "latest",
+          "none"
+        ],
+        "polarity": [
+          "higherIsBetter",
+          "lowerIsBetter",
+          "neutral"
+        ],
+        "headline": [
+          "latest",
+          "total",
+          "average",
+          "change",
+          "none"
+        ]
+      },
+      "rows": {
+        "min": 2,
+        "max": 120
+      },
+      "defaultSpan": 6,
+      "guidance": "One row per period, sorted ascending. Pivot categories into columns (one y column per series) rather than returning long-format rows. A headline (latest or total) gives the card its number."
+    },
+    "composition": {
+      "description": "Parts of a whole: one 100% bar of segments and a list of each part's value and share, led by the total.",
+      "roles": {
+        "x": {
+          "required": true,
+          "types": [
+            "string"
+          ],
+          "description": "The part (category)."
+        },
+        "y": {
+          "required": true,
+          "many": true,
+          "types": [
+            "number"
+          ],
+          "description": "Exactly one non-negative, additive column (USD or count)."
+        }
+      },
+      "rows": {
+        "min": 1,
+        "warn": 6,
+        "max": 12
+      },
+      "defaultSpan": 5,
+      "guidance": "Use for mix and share questions (revenue by line of business, deposit mix). Sort the parts largest first in the pipeline. Past six parts the rest fold into Other."
+    },
+    "table": {
+      "description": "Rows of records with mixed columns.",
+      "roles": {
+        "columns": {
+          "required": true,
+          "many": true,
+          "types": [
+            "string",
+            "number",
+            "date",
+            "boolean"
+          ],
+          "description": "Columns to show, in order."
+        }
+      },
+      "rows": {
+        "min": 0,
+        "max": 200
+      },
+      "defaultSpan": 12,
+      "guidance": "Sort and $limit in the pipeline. Use format badge with tones for status columns."
+    },
+    "list": {
+      "description": "A compact feed of items: a tone dot, title, subtitle, a badge and a meta value on the right.",
+      "roles": {
+        "title": {
+          "required": true,
+          "types": [
+            "string"
+          ]
+        },
+        "subtitle": {
+          "types": [
+            "string"
+          ]
+        },
+        "badge": {
+          "types": [
+            "string"
+          ],
+          "description": "Give it badge tones: they also color the item's dot."
+        },
+        "meta": {
+          "types": [
+            "string",
+            "number",
+            "date"
+          ]
+        }
+      },
+      "rows": {
+        "min": 0,
+        "max": 50
+      },
+      "defaultSpan": 6,
+      "guidance": "Use for signals, contacts, activities. Sort and $limit in the pipeline."
+    }
+  },
+  "columnFeatures": {
+    "grain": "A date column with grain month, quarter or year holds the first day of each period and is shown as that period.",
+    "unitFrom": "{column, map}: the unit varies per row and is read from another column (covenant actual and limit are x, % or USD); each value is formatted in its own unit.",
+    "hidden": "Carried for another column or for linking (e.g. a client id beside its name), not shown in tables."
+  }
+}

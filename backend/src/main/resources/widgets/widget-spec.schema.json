@@ -1,0 +1,547 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Widget spec",
+  "description": "A declarative widget: what data it shows (a semantic query over the semantic layer, or - as a reviewed exception - a custom read-only pipeline) and how one design-system primitive displays it. See primitives.json for each primitive's roles and rules, and GET /api/semantic for what a query can ask.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "description",
+    "data",
+    "view"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$",
+      "description": "Stable kebab-case id, e.g. client-revenue-trend."
+    },
+    "specVersion": {
+      "const": 2,
+      "description": "The spec format. Specs without it are format 1 (data = collection + pipeline + columns) and are read as custom data."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Set by the library: bumped on every saved change."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Card title."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400,
+      "description": "One or two sentences: what the widget shows, its scope and its time window."
+    },
+    "params": {
+      "type": "array",
+      "description": "Inputs a custom pipeline needs, referenced in it as {\"$param\": \"name\"}. A page supplies them (e.g. clientId from the Client 360 picker); asOfDate is built in. Query specs take the client and dates from the page and declare no params.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9]{0,39}$"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "date",
+              "number"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Either query (with optional column overrides) or custom.",
+      "oneOf": [
+        {
+          "required": [
+            "query"
+          ],
+          "not": {
+            "required": [
+              "custom"
+            ]
+          }
+        },
+        {
+          "required": [
+            "custom"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "query"
+                ]
+              },
+              {
+                "required": [
+                  "columns"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "query": {
+          "$ref": "#/$defs/semanticQuery"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/columnOverride"
+          },
+          "description": "query: label or tone changes to derived columns."
+        },
+        "custom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "collection",
+            "pipeline",
+            "columns"
+          ],
+          "description": "The escape hatch: a hand-written read-only aggregation over one source collection, and the columns it returns. Use only what the semantic layer cannot express.",
+          "properties": {
+            "collection": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+              "description": "Source collection the pipeline starts from (see _catalog)."
+            },
+            "pipeline": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object"
+              },
+              "description": "MongoDB aggregation stages. Read-only. Dates are Extended JSON ({\"$date\": \"...\"}) or params of type date; never compare dates to plain strings and never use $$NOW (use the asOfDate param)."
+            },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "description": "The fields every result row has, in display order.",
+              "items": {
+                "$ref": "#/$defs/column"
+              }
+            }
+          }
+        }
+      }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primitive"
+      ],
+      "description": "Which primitive displays the rows, and which columns fill its roles.",
+      "properties": {
+        "primitive": {
+          "enum": [
+            "metric",
+            "bar",
+            "line",
+            "table",
+            "list",
+            "meter",
+            "composition"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "secondary": {
+          "type": "string"
+        },
+        "x": {
+          "type": "string"
+        },
+        "y": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "orientation": {
+          "enum": [
+            "vertical",
+            "horizontal"
+          ]
+        },
+        "stacked": {
+          "type": "boolean"
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "badge": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string",
+          "description": "A numeric column drawn as a limit, target or maximum."
+        },
+        "emphasis": {
+          "enum": [
+            "latest",
+            "max",
+            "min",
+            "none"
+          ],
+          "description": "Which mark is emphasized; the rest are muted."
+        },
+        "polarity": {
+          "enum": [
+            "higherIsBetter",
+            "lowerIsBetter",
+            "neutral"
+          ],
+          "description": "Whether a rise is good; colors changes."
+        },
+        "headline": {
+          "enum": [
+            "latest",
+            "total",
+            "average",
+            "change",
+            "none"
+          ],
+          "description": "The figure computed from the rows that leads a chart."
+        },
+        "warnAt": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "meter: the fraction of the maximum where it turns to warning."
+        },
+        "series": {
+          "type": "string",
+          "description": "bar/line: a text column whose values are the series (long-format rows, one y column)."
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "span": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 12,
+          "description": "Grid columns out of 12."
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Who made the spec and from what (author, catalogVersion, notes). Set by the library on save."
+    }
+  },
+  "$defs": {
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "label"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "date",
+            "boolean"
+          ]
+        },
+        "unit": {
+          "enum": [
+            "USD",
+            "ratio",
+            "percent",
+            "count",
+            "date",
+            "none"
+          ],
+          "description": "ratio = 0-1 fraction; percent = already 0-100."
+        },
+        "format": {
+          "enum": [
+            "text",
+            "number",
+            "integer",
+            "currency",
+            "percent",
+            "percentPoints",
+            "date",
+            "badge"
+          ],
+          "description": "percent formats a 0-1 ratio; percentPoints formats a 0-100 value."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "tones": {
+          "type": "object",
+          "description": "For format badge: value -> tone.",
+          "additionalProperties": {
+            "enum": [
+              "good",
+              "warn",
+              "bad",
+              "info",
+              "neutral"
+            ]
+          }
+        }
+      }
+    },
+    "columnOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "Changes to a derived column of a query: its label, or badge tones for a text column.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "tones": {
+          "type": "object",
+          "description": "For format badge: value -> tone.",
+          "additionalProperties": {
+            "enum": [
+              "good",
+              "warn",
+              "bad",
+              "info",
+              "neutral"
+            ]
+          }
+        }
+      }
+    },
+    "semanticQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What to show, in the semantic layer's terms (GET /api/semantic). aggregate: metrics by dimensions over a window; records: a model's fields.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "aggregate",
+            "records"
+          ]
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Metric ids (measures or derived metrics)."
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Dimension ids, including month / quarter / year."
+        },
+        "model": {
+          "type": "string",
+          "description": "records: the model to list."
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "records: record field ids, in order."
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "on",
+              "op",
+              "value"
+            ],
+            "properties": {
+              "on": {
+                "type": "string",
+                "description": "A dimension id (or, for records, a record field id)."
+              },
+              "op": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "in",
+                  "nin",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte"
+                ]
+              },
+              "value": {
+                "description": "A value, or a list for in / nin."
+              }
+            }
+          }
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Named subsets of the model, e.g. open, active."
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "all",
+                "ytd",
+                "trailing",
+                "lastClosed",
+                "current",
+                "next",
+                "range"
+              ]
+            },
+            "unit": {
+              "enum": [
+                "day",
+                "month",
+                "quarter",
+                "year"
+              ]
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120
+            },
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "on": {
+              "type": "string",
+              "description": "Which of the model's dates the window applies to (default: its time field)."
+            }
+          }
+        },
+        "compare": {
+          "enum": [
+            "priorYear",
+            "priorPeriod"
+          ],
+          "description": "Adds <metric>Prior: each metric over the comparison window."
+        },
+        "sort": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "by"
+            ],
+            "properties": {
+              "by": {
+                "type": "string"
+              },
+              "dir": {
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            }
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "scope": {
+          "enum": [
+            "inherit",
+            "book",
+            "entity"
+          ],
+          "description": "inherit (default): the page's selected client if it has one, else the book; book: always the whole book; entity: needs a selected client."
+        },
+        "period": {
+          "enum": [
+            "page",
+            "fixed"
+          ],
+          "description": "page: follow the page's period when it has one (window is then the default); fixed (default): always window."
+        },
+        "pageFilters": {
+          "type": "boolean",
+          "description": "false: ignore the page's filters (default true: apply them wherever these figures can be filtered that way)."
+        }
+      }
+    }
+  }
+}

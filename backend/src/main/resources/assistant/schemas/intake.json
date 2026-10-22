@@ -1,0 +1,212 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "outcome",
+    "message",
+    "brief",
+    "reuseDefinitionId",
+    "changed"
+  ],
+  "properties": {
+    "outcome": {
+      "enum": [
+        "proceed",
+        "clarify",
+        "answer",
+        "reuse",
+        "decline",
+        "verify"
+      ],
+      "description": "proceed = build the widget in brief; clarify = ask one question first; answer = reply to a question about the data without building; reuse = an existing library widget already answers it; decline = cannot or should not be built (say why); verify = the banker asks to double-check the current proposal.",
+      "type": "string"
+    },
+    "message": {
+      "type": "string",
+      "description": "What to tell the banker: the question (clarify), the answer (answer), what already exists (reuse), why not (decline), or a one-line acknowledgement (proceed/verify)."
+    },
+    "brief": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "question",
+            "titleHint",
+            "scope",
+            "measures",
+            "dimensions",
+            "time",
+            "filters",
+            "sort",
+            "limit",
+            "display",
+            "assumptions"
+          ],
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "The business question the widget answers, in one sentence, in the banker's terms."
+            },
+            "titleHint": {
+              "type": "string",
+              "description": "A short working title (<= 40 characters)."
+            },
+            "scope": {
+              "enum": [
+                "client",
+                "book"
+              ],
+              "description": "client = one client, supplied by the page's clientId; book = across all clients.",
+              "type": "string"
+            },
+            "measures": {
+              "type": "array",
+              "description": "The figures to show. At least one.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "definition",
+                  "unit"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "What the figure is called, e.g. 'Revenue YTD'."
+                  },
+                  "definition": {
+                    "type": "string",
+                    "description": "Plain-language definition, using the data dictionary's terms where one exists."
+                  },
+                  "unit": {
+                    "enum": [
+                      "USD",
+                      "ratio",
+                      "percent",
+                      "count",
+                      "date",
+                      "none"
+                    ],
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "dimensions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "What the figures are broken down by (e.g. 'line of business', 'quarter'). Empty for a single value."
+            },
+            "time": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "window",
+                "grain"
+              ],
+              "properties": {
+                "window": {
+                  "type": "string",
+                  "description": "The period covered, relative to asOfDate, e.g. 'last 8 closed quarters', 'calendar year to date', 'current state'."
+                },
+                "grain": {
+                  "enum": [
+                    "none",
+                    "month",
+                    "quarter",
+                    "year"
+                  ],
+                  "description": "Time bucket for trends; none when there is no time axis.",
+                  "type": "string"
+                }
+              }
+            },
+            "filters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Conditions on the data, e.g. 'open deals only', 'severity P1'."
+            },
+            "sort": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Ordering, e.g. 'largest expected revenue first'."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "description": "Top-N cut-off for lists, or null."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "display": {
+              "enum": [
+                "metric",
+                "bar",
+                "line",
+                "table",
+                "list",
+                "meter",
+                "composition",
+                "any"
+              ],
+              "description": "The banker's display preference, or any.",
+              "type": "string"
+            },
+            "assumptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Every choice you made that the banker did not state (defaults, interpretations). Shown to the banker."
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reuseDefinitionId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "For reuse: the library widget id."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "changed": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "measure",
+          "window",
+          "filter",
+          "grouping",
+          "scope",
+          "presentation"
+        ],
+        "type": "string"
+      },
+      "description": "For a revision of the current brief: which aspects changed. Empty for a new request."
+    }
+  }
+}

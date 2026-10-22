@@ -1,0 +1,157 @@
+{
+  "name": "submit_data",
+  "strict": false,
+  "description": "Submit the finished data definition for the widget. Call it once the pipeline has been tested with run_query and returns exactly the brief's figures. The submission is checked automatically (schema, parameters, units and formats, a live run with the sample parameters, catalog references); if anything fails you get the reasons back - fix them and submit again.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "params": {
+        "type": "array",
+        "description": "The parameters the pipeline references as {\"$param\": \"name\"}. Declare asOfDate (type date) whenever the pipeline uses it.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "type"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "clientId or asOfDate (or another page parameter)"
+            },
+            "type": {
+              "enum": [
+                "string",
+                "date",
+                "number"
+              ],
+              "type": "string"
+            }
+          }
+        }
+      },
+      "collection": {
+        "type": "string",
+        "description": "A data collection of the bank database (see the data dictionary), e.g. holdings."
+      },
+      "pipeline": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "MongoDB aggregation stages, read-only. Reference parameters as {\"$param\": \"clientId\"} / {\"$param\": \"asOfDate\"}; never literal client ids or dates."
+      },
+      "columns": {
+        "type": "array",
+        "description": "Every field each result row has, in display order.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "type",
+            "unit",
+            "format",
+            "label"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "string",
+                "number",
+                "date",
+                "boolean"
+              ],
+              "type": "string"
+            },
+            "unit": {
+              "enum": [
+                "USD",
+                "ratio",
+                "percent",
+                "count",
+                "date",
+                "none"
+              ],
+              "description": "USD for money; ratio for a 0-1 fraction; percent for a value already 0-100; count; date; none.",
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "text",
+                "number",
+                "integer",
+                "currency",
+                "percent",
+                "percentPoints",
+                "date",
+                "badge"
+              ],
+              "description": "Must agree with unit: USD->currency, ratio->percent, percent->percentPoints, count->integer, date->date.",
+              "type": "string"
+            },
+            "label": {
+              "type": "string",
+              "description": "Human column label."
+            }
+          }
+        }
+      },
+      "measures": {
+        "type": "array",
+        "description": "One entry per numeric column: how it is defined and where the definition comes from.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "column",
+            "definition",
+            "catalogReference"
+          ],
+          "properties": {
+            "column": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string",
+              "description": "Plain-language definition as computed by the pipeline."
+            },
+            "catalogReference": {
+              "type": "string",
+              "description": "collection.field or collection.derivedMetricName from the data dictionary that this figure is based on, e.g. holdings.drawnUsd or clients.utilization."
+            }
+          }
+        }
+      },
+      "expectedShape": {
+        "type": "string",
+        "description": "What the rows should look like, e.g. 'one row per quarter, 8 rows, ascending'."
+      },
+      "emptyIsExpected": {
+        "type": "boolean",
+        "description": "true only if an empty result is a legitimate outcome for some clients (e.g. a client with no covenants) and the sample happened to be empty."
+      },
+      "assumptions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Data-level choices the banker should know about (e.g. 'counts only open deals')."
+      }
+    },
+    "required": [
+      "params",
+      "collection",
+      "pipeline",
+      "columns",
+      "measures",
+      "expectedShape",
+      "emptyIsExpected",
+      "assumptions"
+    ]
+  }
+}

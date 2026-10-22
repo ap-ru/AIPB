@@ -1,0 +1,100 @@
+{
+  "id": "client-active-signals",
+  "version": 1,
+  "title": "Active signals",
+  "description": "The selected client's unresolved signals, most severe and most recent first (top 10).",
+  "params": [
+    {
+      "name": "clientId",
+      "type": "string",
+      "description": "Client key (clients.clientId), e.g. CL-0001"
+    }
+  ],
+  "data": {
+    "collection": "signals",
+    "pipeline": [
+      {
+        "$match": {
+          "clientId": {
+            "$param": "clientId"
+          },
+          "stage": {
+            "$ne": "Resolved"
+          }
+        }
+      },
+      {
+        "$sort": {
+          "severity": 1,
+          "detectedAt": -1
+        }
+      },
+      {
+        "$limit": 10
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "title": 1,
+          "severity": 1,
+          "detectedAt": 1,
+          "subtitle": {
+            "$concat": [
+              "$category",
+              " · ",
+              "$type",
+              " · ",
+              "$stage"
+            ]
+          }
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "title",
+        "type": "string",
+        "label": "Signal"
+      },
+      {
+        "name": "subtitle",
+        "type": "string",
+        "label": "Category · type · stage"
+      },
+      {
+        "name": "severity",
+        "type": "string",
+        "format": "badge",
+        "label": "Severity",
+        "tones": {
+          "P1": "bad",
+          "P2": "warn",
+          "P3": "info"
+        }
+      },
+      {
+        "name": "detectedAt",
+        "type": "date",
+        "unit": "date",
+        "format": "date",
+        "label": "Detected"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "list",
+    "title": "title",
+    "subtitle": "subtitle",
+    "badge": "severity",
+    "meta": "detectedAt"
+  },
+  "layout": {
+    "span": 5
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

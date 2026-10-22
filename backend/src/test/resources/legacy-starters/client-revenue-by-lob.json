@@ -1,0 +1,99 @@
+{
+  "id": "client-revenue-by-lob",
+  "version": 2,
+  "title": "Revenue by line of business",
+  "description": "Trailing-12-month revenue for the selected client, split by line of business.",
+  "params": [
+    {
+      "name": "clientId",
+      "type": "string",
+      "description": "Client key (clients.clientId), e.g. CL-0001"
+    },
+    {
+      "name": "asOfDate",
+      "type": "date",
+      "description": "The dataset's 'today' (built in)"
+    }
+  ],
+  "data": {
+    "collection": "revenue_monthly",
+    "pipeline": [
+      {
+        "$match": {
+          "clientId": {
+            "$param": "clientId"
+          },
+          "$expr": {
+            "$gte": [
+              "$month",
+              {
+                "$dateSubtract": {
+                  "startDate": {
+                    "$dateTrunc": {
+                      "date": {
+                        "$param": "asOfDate"
+                      },
+                      "unit": "month"
+                    }
+                  },
+                  "unit": "month",
+                  "amount": 12
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "$group": {
+          "_id": "$lob",
+          "revenueUsd": {
+            "$sum": "$totalUsd"
+          }
+        }
+      },
+      {
+        "$sort": {
+          "revenueUsd": -1
+        }
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "lob": "$_id",
+          "revenueUsd": 1
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "lob",
+        "type": "string",
+        "label": "Line of business"
+      },
+      {
+        "name": "revenueUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Revenue (T12M)"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "composition",
+    "x": "lob",
+    "y": [
+      "revenueUsd"
+    ]
+  },
+  "layout": {
+    "span": 5
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

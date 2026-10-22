@@ -1,0 +1,29 @@
+{
+  "description": "Derived metrics: figures computed from other metrics (a model's measures or other derived metrics), possibly across models. An operand is a metric id, or {\"metric\": id, \"window\": {...}} to pin its time window (shareOfWallet always uses the last 12 closed months), or {\"sum\": [operands]}. Kinds: ratio (numerator / denominator; unknown, not 0, when the denominator is 0 or missing - no credit is not 0% utilization), difference (left - right), change ((current - prior) / prior, prior = the operand over the compare window), same (the operand under a new name, usually with a pinned window).",
+  "version": 1,
+  "metrics": [
+    { "id": "utilization", "label": "Utilization", "kind": "ratio", "numerator": "exposureUsd", "denominator": "committedUsd",
+      "unit": "ratio", "polarity": "lowerIsBetter",
+      "description": "Drawn balance as a share of the committed limit across credit facilities. Above 0.9 on revolving lines is a warning sign." },
+    { "id": "revenueT12mUsd", "label": "Revenue (T12M)", "kind": "same", "of": { "metric": "revenueUsd", "window": { "type": "trailing", "unit": "month", "n": 12 } },
+      "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Revenue over the 12 most recent closed months." },
+    { "id": "shareOfWallet", "label": "Share of wallet", "kind": "ratio",
+      "numerator": { "metric": "revenueUsd", "window": { "type": "trailing", "unit": "month", "n": 12 } }, "denominator": "walletSizeUsd",
+      "unit": "ratio", "polarity": "higherIsBetter",
+      "description": "Trailing-12-month revenue as a share of the client's estimated annual banking wallet." },
+    { "id": "walletGapUsd", "label": "Wallet gap", "kind": "difference",
+      "left": "walletSizeUsd", "right": { "metric": "revenueUsd", "window": { "type": "trailing", "unit": "month", "n": 12 } },
+      "unit": "USD", "polarity": "lowerIsBetter",
+      "description": "Wallet size minus trailing-12-month revenue: banking spend the client places with other banks." },
+    { "id": "revenueYoY", "label": "Revenue growth (YoY)", "kind": "change", "of": "revenueUsd", "compare": "priorYear",
+      "unit": "ratio", "polarity": "higherIsBetter",
+      "description": "Change in revenue against the same period a year earlier." },
+    { "id": "winRate", "label": "Win rate", "kind": "ratio", "numerator": "wonDeals", "denominator": { "sum": ["wonDeals", "lostDeals"] },
+      "unit": "ratio", "polarity": "higherIsBetter",
+      "description": "Deals won as a share of deals closed (won or lost)." },
+    { "id": "feeShare", "label": "Fee share", "kind": "ratio", "numerator": "feeUsd", "denominator": "revenueUsd",
+      "unit": "ratio", "polarity": "neutral",
+      "description": "Fee income as a share of revenue." }
+  ]
+}

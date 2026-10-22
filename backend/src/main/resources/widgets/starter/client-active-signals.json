@@ -1,0 +1,40 @@
+{
+  "id": "client-active-signals",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Active signals",
+  "description": "The selected client's unresolved signals, most severe and most recent first (top 10).",
+  "data": {
+    "query": {
+      "kind": "records",
+      "model": "signals",
+      "segments": [
+        "active"
+      ],
+      "fields": [
+        "title",
+        "subtitle",
+        "severity",
+        "detectedAt"
+      ],
+      "limit": 10,
+      "scope": "entity"
+    }
+  },
+  "view": {
+    "primitive": "list",
+    "title": "title",
+    "subtitle": "subtitle",
+    "badge": "severity",
+    "meta": "detectedAt"
+  },
+  "layout": {
+    "span": 5
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

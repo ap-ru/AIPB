@@ -1,0 +1,120 @@
+name: aipb
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: aipb-mongo
+    restart: unless-stopped
+    # Authentication is on (the image enables it when a root user is given). Users are created from mongo-init/ the first
+    # time the volume is initialized; to re-create them, remove the volume (docker compose down -v).
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env (see .env.example)}
+      AIPB_APP_PASSWORD: ${AIPB_APP_PASSWORD:?set AIPB_APP_PASSWORD in .env (see .env.example)}
+      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD:?set BANK_WRITER_PASSWORD in .env (see .env.example)}
+      BANK_READER_PASSWORD: ${BANK_READER_PASSWORD:?set BANK_READER_PASSWORD in .env (see .env.example)}
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Logs in as a created user, so it only passes once the init scripts are done and the real server is up.
+      test: ["CMD-SHELL", "mongosh --quiet \"mongodb://bank_reader:$${BANK_READER_PASSWORD}@localhost:27017/bank?authSource=bank\" --eval 'db.runCommand({ping:1}).ok' | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: generates the synthetic `bank` source database (skips if it already exists; BANK_RESET=true regenerates).
+  bank-seed:
+    image: mongo:7
+    container_name: aipb-bank-seed
+    restart: "no"
+    environment:
+      SEED_DIR: /seed
+      BANK_RESET: ${BANK_RESET:-false}
+      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD}
+    volumes:
+      - ./data:/seed:ro
+    command: ["sh", "-c", "exec mongosh \"mongodb://bank_writer:$${BANK_WRITER_PASSWORD}@mongo:27017/bank?authSource=bank\" --quiet /seed/generate.js"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # MongoDB MCP server: the single, read-only gateway to the `bank` source data. Used by the backend (widget data at
+  # runtime, and the assistant exploring data while it designs a widget) and by Claude Code via .mcp.json.
+  mcp:
+    image: mongodb/mongodb-mcp-server:3.0.5
+    container_name: aipb-mcp
+    restart: unless-stopped
+    environment:
+      # bank_reader can only read `bank`: the database enforces the lock, not this server or our code.
+      MDB_MCP_CONNECTION_STRING: mongodb://bank_reader:${BANK_READER_PASSWORD}@mongo:27017/bank?authSource=bank
+      MDB_MCP_READ_ONLY: "true"
+      # The data source is pinned: no switching connections, no file exports, no calls to MongoDB's hosted services.
+      MDB_MCP_DISABLED_TOOLS: connect,disconnect,export,mongodb-logs,search-knowledge,list-knowledge-sources
+      # Widgets read whole (usually aggregated) result sets, so allow more than the default 100 documents per call.
+      MDB_MCP_MAX_DOCUMENTS_PER_QUERY: "1000"
+      MDB_MCP_MAX_TIME_M_S: "10000"
+      MDB_MCP_TRANSPORT: http
+      MDB_MCP_HTTP_HOST: 0.0.0.0
+      MDB_MCP_HTTP_PORT: "3000"
+      MDB_MCP_DANGEROUS_HOST_BINDING: "true" # required to listen beyond the container's loopback; the host port below is localhost-only
+      MDB_MCP_HTTP_RESPONSE_TYPE: json
+      MDB_MCP_MONITORING_SERVER_HOST: 0.0.0.0
+      MDB_MCP_MONITORING_SERVER_PORT: "3002"
+      MDB_MCP_LOGGERS: stderr,mcp
+      MDB_MCP_TELEMETRY: disabled
+    ports:
+      - "127.0.0.1:3001:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    image: aipb-backend:latest
+    container_name: aipb-backend
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://aipb_app:${AIPB_APP_PASSWORD}@mongo:27017/aipb?authSource=aipb
+      AIPB_SEED: "true"
+      AIPB_RESET: ${AIPB_RESET:-false}
+      AIPB_CORS: http://localhost:3080,http://localhost:5173
+      AIPB_MCP_URL: http://mcp:3000/mcp
+      AIPB_SOURCE_DB: bank
+      # The widget assistant: enabled when ANTHROPIC_API_KEY is set. Model and per-stage effort (low|medium|high|xhigh|max).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AIPB_ASSISTANT_MODEL: ${AIPB_ASSISTANT_MODEL:-claude-opus-5-5}
+      AIPB_EFFORT_INTAKE: ${AIPB_EFFORT_INTAKE:-medium}
+      AIPB_EFFORT_BUILD: ${AIPB_EFFORT_BUILD:-medium}
+      AIPB_EFFORT_REVIEW: ${AIPB_EFFORT_REVIEW:-medium}
+      AIPB_EFFORT_PRESENT: ${AIPB_EFFORT_PRESENT:-medium}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
+      # starter widget specs are validated against the bank data at startup
+      bank-seed:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    image: aipb-frontend:latest
+    container_name: aipb-frontend
+    restart: unless-stopped
+    ports:
+      - "3080:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:

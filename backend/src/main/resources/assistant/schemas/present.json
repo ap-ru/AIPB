@@ -1,0 +1,214 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "description",
+    "primitive",
+    "roles",
+    "span",
+    "columnOverrides"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Card title, plain words, <= 40 characters."
+    },
+    "description": {
+      "type": "string",
+      "description": "One or two sentences: what the widget shows, its scope and its time window."
+    },
+    "primitive": {
+      "enum": [
+        "metric",
+        "bar",
+        "line",
+        "table",
+        "list",
+        "meter",
+        "composition"
+      ],
+      "type": "string"
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "compare",
+        "secondary",
+        "x",
+        "y",
+        "orientation",
+        "stacked",
+        "columns",
+        "title",
+        "subtitle",
+        "badge",
+        "meta",
+        "reference",
+        "emphasis",
+        "polarity",
+        "headline",
+        "warnAt"
+      ],
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "metric/meter: the headline number column; \"\" when unused"
+        },
+        "compare": {
+          "type": "string",
+          "description": "metric: prior-period column; shown as % change; \"\" when unused"
+        },
+        "secondary": {
+          "type": "string",
+          "description": "metric/meter: supporting figure column; \"\" when unused"
+        },
+        "x": {
+          "type": "string",
+          "description": "bar/line/composition: category or period column; metric: period column for a sparkline; meter: row label; \"\" when unused"
+        },
+        "y": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "bar/line: one or more numeric columns in the same unit; composition: exactly one; [] when unused"
+        },
+        "orientation": {
+          "type": "string",
+          "enum": [
+            "default",
+            "vertical",
+            "horizontal"
+          ],
+          "description": "bar: \"default\" when unused"
+        },
+        "stacked": {
+          "type": "boolean",
+          "description": "bar/line: false unless stacked"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "table: columns to show, in order; [] when unused"
+        },
+        "title": {
+          "type": "string",
+          "description": "list: title column; \"\" when unused"
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "list: subtitle column; \"\" when unused"
+        },
+        "badge": {
+          "type": "string",
+          "description": "list: badge column; \"\" when unused"
+        },
+        "meta": {
+          "type": "string",
+          "description": "list: right-hand meta column; \"\" when unused"
+        },
+        "reference": {
+          "type": "string",
+          "description": "bar/line/meter: numeric column for a limit, target or maximum, same unit as the values; \"\" when unused"
+        },
+        "emphasis": {
+          "type": "string",
+          "enum": [
+            "default",
+            "latest",
+            "max",
+            "min",
+            "none"
+          ],
+          "description": "\"default\" when unused"
+        },
+        "polarity": {
+          "type": "string",
+          "enum": [
+            "default",
+            "higherIsBetter",
+            "lowerIsBetter",
+            "neutral"
+          ],
+          "description": "\"default\" when unused"
+        },
+        "headline": {
+          "type": "string",
+          "enum": [
+            "default",
+            "latest",
+            "total",
+            "average",
+            "change",
+            "none"
+          ],
+          "description": "\"default\" when unused"
+        },
+        "warnAt": {
+          "type": "number",
+          "description": "meter: 0-1 fraction of the maximum where it turns to warning; 0 when unused"
+        }
+      },
+      "description": "Fill the roles and intents of the chosen primitive (see the design catalog); leave every other one at its unused value: \"\" for a column, [] for a list, \"default\" for orientation and intents, false for stacked, 0 for warnAt."
+    },
+    "span": {
+      "type": "integer",
+      "description": "Grid width out of 12 (3-12)."
+    },
+    "columnOverrides": {
+      "type": "array",
+      "description": "Optional label changes and badge tones for status columns.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "label",
+          "badgeTones"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Column name (must be a column of the data)."
+          },
+          "label": {
+            "type": "string",
+            "description": "New label; \"\" to keep it."
+          },
+          "badgeTones": {
+            "type": "array",
+            "description": "Make this text column a badge: value -> tone; [] for none.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "tone"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "tone": {
+                  "enum": [
+                    "good",
+                    "warn",
+                    "bad",
+                    "info",
+                    "neutral"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

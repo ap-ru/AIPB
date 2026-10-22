@@ -1,0 +1,63 @@
+{
+  "id": "opportunities",
+  "label": "Opportunities",
+  "version": 1,
+  "description": "The sales pipeline: open deals and deals closed in the last year.",
+  "collection": "opportunities",
+  "entity": "clientId",
+  "time": { "field": "closeDate", "grain": "month", "closedOnly": false },
+  "dates": { "close": "closeDate", "created": "createdDate" },
+  "dimensions": {
+    "lob": "lob",
+    "product": { "field": "productId", "display": "productName" },
+    "dealStage": "stage",
+    "forecastCategory": "forecastCategory",
+    "dealRisk": "riskLevel",
+    "dealOwner": "owner"
+  },
+  "segments": {
+    "open": { "description": "open deals (not Closed Won / Closed Lost)", "where": [{ "field": "stage", "op": "nin", "value": ["Closed Won", "Closed Lost"] }] },
+    "won": { "description": "deals won", "where": [{ "field": "stage", "op": "eq", "value": "Closed Won" }] },
+    "lost": { "description": "deals lost", "where": [{ "field": "stage", "op": "eq", "value": "Closed Lost" }] },
+    "stalled": { "description": "open deals more than 45 days in their stage", "where": [
+      { "field": "stage", "op": "nin", "value": ["Closed Won", "Closed Lost"] }, { "field": "daysInStage", "op": "gt", "value": 45 }] }
+  },
+  "measures": [
+    { "id": "pipelineUsd", "label": "Open pipeline", "agg": "sum", "field": "expectedRevenueUsd", "segments": ["open"], "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Expected first-year revenue of open deals." },
+    { "id": "weightedPipelineUsd", "label": "Weighted pipeline", "agg": "sum", "segments": ["open"], "unit": "USD", "polarity": "higherIsBetter",
+      "expr": { "$multiply": ["$expectedRevenueUsd", { "$divide": ["$probability", 100] }] }, "sources": ["opportunities.expectedRevenueUsd", "opportunities.probability"],
+      "description": "Expected first-year revenue of open deals, weighted by win probability." },
+    { "id": "openDeals", "label": "Open deals", "agg": "count", "segments": ["open"], "unit": "count", "polarity": "higherIsBetter",
+      "description": "Number of open deals." },
+    { "id": "openDealSizeUsd", "label": "Open deal size", "agg": "sum", "field": "dealSizeUsd", "segments": ["open"], "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Facility size, notional or balance of open deals (not revenue)." },
+    { "id": "stalledDeals", "label": "Stalled deals", "agg": "count", "segments": ["stalled"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Open deals more than 45 days in their current stage." },
+    { "id": "wonDeals", "label": "Deals won", "agg": "count", "segments": ["won"], "unit": "count", "polarity": "higherIsBetter",
+      "description": "Number of deals closed won." },
+    { "id": "lostDeals", "label": "Deals lost", "agg": "count", "segments": ["lost"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Number of deals closed lost." },
+    { "id": "wonRevenueUsd", "label": "Won revenue", "agg": "sum", "field": "expectedRevenueUsd", "segments": ["won"], "unit": "USD", "polarity": "higherIsBetter",
+      "description": "Expected first-year revenue of deals won." }
+  ],
+  "records": {
+    "key": "opportunityId",
+    "fields": [
+      { "id": "name", "label": "Opportunity", "field": "name", "type": "string" },
+      { "id": "clientName", "label": "Client", "field": "client.name", "type": "string" },
+      { "id": "productName", "label": "Product", "field": "productName", "type": "string" },
+      { "id": "lob", "label": "LOB", "field": "lob", "type": "string", "dimension": "lob" },
+      { "id": "stage", "label": "Stage", "field": "stage", "type": "string", "dimension": "dealStage" },
+      { "id": "probability", "label": "Probability", "field": "probability", "type": "number", "unit": "percent" },
+      { "id": "expectedRevenueUsd", "label": "Expected revenue", "field": "expectedRevenueUsd", "type": "number", "unit": "USD" },
+      { "id": "dealSizeUsd", "label": "Deal size", "field": "dealSizeUsd", "type": "number", "unit": "USD" },
+      { "id": "closeDate", "label": "Close", "field": "closeDate", "type": "date", "unit": "date" },
+      { "id": "owner", "label": "Owner", "field": "owner", "type": "string" },
+      { "id": "riskLevel", "label": "Risk", "field": "riskLevel", "type": "string", "dimension": "dealRisk" },
+      { "id": "daysInStage", "label": "Days in stage", "field": "daysInStage", "type": "number", "unit": "count" },
+      { "id": "nextStep", "label": "Next step", "field": "nextStep", "type": "string" }
+    ],
+    "defaultSort": [{ "by": "expectedRevenueUsd", "dir": "desc" }]
+  }
+}

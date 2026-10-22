@@ -1,0 +1,35 @@
+[ {
+  "purpose" : "Signals records",
+  "collection" : "signals",
+  "pipeline" : [ {
+    "$match" : {
+      "clientId" : {
+        "$eq" : "CL-0001"
+      },
+      "stage" : {
+        "$ne" : "Resolved"
+      }
+    }
+  }, {
+    "$project" : {
+      "_id" : 0,
+      "title" : "$title",
+      "subtitle" : {
+        "$concat" : [ "$category", " · ", "$type", " · ", "$stage" ]
+      },
+      "severity" : "$severity",
+      "detectedAt" : "$detectedAt",
+      "_key" : "$signalId"
+    }
+  }, {
+    "$sort" : {
+      "severity" : 1,
+      "detectedAt" : -1,
+      "_key" : 1
+    }
+  }, {
+    "$limit" : 11
+  }, {
+    "$unset" : "_key"
+  } ]
+} ]

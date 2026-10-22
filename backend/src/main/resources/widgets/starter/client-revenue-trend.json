@@ -1,0 +1,42 @@
+{
+  "id": "client-revenue-trend",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Revenue trend",
+  "description": "Quarterly revenue (NII + fees) for the selected client over the last 8 closed quarters.",
+  "data": {
+    "query": {
+      "metrics": [
+        "revenueUsd"
+      ],
+      "dimensions": [
+        "quarter"
+      ],
+      "window": {
+        "type": "lastClosed",
+        "unit": "quarter",
+        "n": 8
+      },
+      "scope": "entity"
+    }
+  },
+  "view": {
+    "primitive": "bar",
+    "x": "quarter",
+    "y": [
+      "revenueUsd"
+    ],
+    "emphasis": "latest",
+    "headline": "total",
+    "polarity": "higherIsBetter"
+  },
+  "layout": {
+    "span": 7
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

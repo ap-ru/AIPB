@@ -1,0 +1,30 @@
+{
+  "id": "contacts",
+  "label": "Contacts",
+  "version": 1,
+  "description": "People at each client that the coverage team deals with.",
+  "collection": "contacts",
+  "entity": "clientId",
+  "time": null,
+  "dates": { "lastContact": "lastContactDate" },
+  "dimensions": {
+    "contactRole": "role"
+  },
+  "measures": [
+    { "id": "contactCount", "label": "Contacts", "agg": "count", "unit": "count", "polarity": "neutral",
+      "description": "Number of client contacts." }
+  ],
+  "records": {
+    "key": "contactId",
+    "fields": [
+      { "id": "name", "label": "Name", "field": "name", "type": "string" },
+      { "id": "title", "label": "Title", "field": "title", "type": "string" },
+      { "id": "role", "label": "Role", "field": "role", "type": "string", "dimension": "contactRole" },
+      { "id": "email", "label": "Email", "field": "email", "type": "string" },
+      { "id": "isPrimary", "label": "Primary", "field": "isPrimary", "type": "boolean" },
+      { "id": "clientName", "label": "Client", "field": "client.name", "type": "string" },
+      { "id": "lastContactDate", "label": "Last contact", "field": "lastContactDate", "type": "date", "unit": "date" }
+    ],
+    "defaultSort": [{ "by": "isPrimary", "dir": "desc" }, { "by": "name", "dir": "asc" }]
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "name": "submit_review",
+  "strict": true,
+  "description": "Submit your review verdict. Call it after you have checked the pipeline against the brief and the data dictionary and recomputed at least one key figure a different way with run_query.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "verdict": {
+        "enum": [
+          "pass",
+          "fail"
+        ],
+        "type": "string"
+      },
+      "summary": {
+        "type": "string",
+        "description": "One or two sentences for the banker."
+      },
+      "checks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "check",
+            "result",
+            "evidence"
+          ],
+          "properties": {
+            "check": {
+              "type": "string"
+            },
+            "result": {
+              "enum": [
+                "pass",
+                "fail",
+                "not_applicable"
+              ],
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "issues": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "severity",
+            "description",
+            "fixHint"
+          ],
+          "properties": {
+            "severity": {
+              "enum": [
+                "blocking",
+                "minor"
+              ],
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "fixHint": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "independentChecks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "figure",
+            "method",
+            "expected",
+            "actual",
+            "match"
+          ],
+          "properties": {
+            "figure": {
+              "type": "string",
+              "description": "Which figure, for which sample parameters."
+            },
+            "method": {
+              "type": "string",
+              "description": "How you recomputed it differently."
+            },
+            "expected": {
+              "type": "number",
+              "description": "The widget's value."
+            },
+            "actual": {
+              "type": "number",
+              "description": "Your independently computed value."
+            },
+            "match": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "required": [
+      "verdict",
+      "summary",
+      "checks",
+      "issues",
+      "independentChecks"
+    ]
+  }
+}

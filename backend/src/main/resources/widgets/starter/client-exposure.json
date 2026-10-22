@@ -1,0 +1,33 @@
+{
+  "id": "client-exposure",
+  "specVersion": 2,
+  "version": 4,
+  "title": "Credit exposure",
+  "description": "Drawn balance across credit facilities, with utilization of the committed limit.",
+  "data": {
+    "query": {
+      "metrics": [
+        "exposureUsd",
+        "committedUsd",
+        "utilization"
+      ]
+    }
+  },
+  "view": {
+    "primitive": "meter",
+    "value": "exposureUsd",
+    "reference": "committedUsd",
+    "secondary": "utilization",
+    "polarity": "lowerIsBetter",
+    "warnAt": 0.8
+  },
+  "layout": {
+    "span": 3
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

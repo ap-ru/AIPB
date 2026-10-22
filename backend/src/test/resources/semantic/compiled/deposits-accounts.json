@@ -1,0 +1,30 @@
+[ {
+  "purpose" : "Holdings: depositsUsd, depositAccounts",
+  "collection" : "holdings",
+  "pipeline" : [ {
+    "$match" : {
+      "clientId" : {
+        "$eq" : "CL-0001"
+      },
+      "productType" : {
+        "$eq" : "deposit"
+      }
+    }
+  }, {
+    "$group" : {
+      "_id" : null,
+      "m0" : {
+        "$sum" : "$balanceUsd"
+      },
+      "m1" : {
+        "$sum" : 1
+      }
+    }
+  }, {
+    "$project" : {
+      "_id" : 0,
+      "m0" : 1,
+      "m1" : 1
+    }
+  } ]
+} ]

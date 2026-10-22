@@ -1,0 +1,14 @@
+[
+  { "definitionId": "client-revenue-ytd",        "scope": "client", "request": "How much revenue have we booked with this client this year, compared with last year?" },
+  { "definitionId": "client-exposure",           "scope": "client", "request": "What is our credit exposure to this client, and how much of their limit are they using?" },
+  { "definitionId": "client-deposits",           "scope": "client", "request": "How much does this client keep on deposit with us?" },
+  { "definitionId": "client-open-pipeline",      "scope": "client", "request": "What is the open pipeline with this client?" },
+  { "definitionId": "client-revenue-trend",      "scope": "client", "request": "Show this client's revenue by quarter for the last two years." },
+  { "definitionId": "client-revenue-by-lob",     "scope": "client", "request": "Which lines of business earn the most from this client over the last 12 months?" },
+  { "definitionId": "client-holdings",           "scope": "client", "request": "List every product this client holds with its current balance." },
+  { "definitionId": "client-covenants",          "scope": "client", "request": "Show this client's covenants, tightest headroom first." },
+  { "definitionId": "client-open-opportunities", "scope": "client", "request": "What are the biggest open deals with this client?" },
+  { "definitionId": "client-active-signals",     "scope": "client", "request": "What unresolved signals are there for this client?" },
+  { "definitionId": "client-contacts",           "scope": "client", "request": "Who are our contacts at this client?" },
+  { "definitionId": "book-revenue-by-lob-monthly", "scope": "book", "request": "Show monthly revenue across the book by line of business for the last two years." }
+]

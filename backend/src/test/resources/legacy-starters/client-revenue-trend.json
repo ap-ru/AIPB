@@ -1,0 +1,145 @@
+{
+  "id": "client-revenue-trend",
+  "version": 2,
+  "title": "Revenue trend",
+  "description": "Quarterly revenue (NII + fees) for the selected client over the last 8 closed quarters.",
+  "params": [
+    {
+      "name": "clientId",
+      "type": "string",
+      "description": "Client key (clients.clientId), e.g. CL-0001"
+    },
+    {
+      "name": "asOfDate",
+      "type": "date",
+      "description": "The dataset's 'today' (built in)"
+    }
+  ],
+  "data": {
+    "collection": "revenue_monthly",
+    "pipeline": [
+      {
+        "$match": {
+          "clientId": {
+            "$param": "clientId"
+          },
+          "$expr": {
+            "$and": [
+              {
+                "$gte": [
+                  "$month",
+                  {
+                    "$dateSubtract": {
+                      "startDate": {
+                        "$dateTrunc": {
+                          "date": {
+                            "$param": "asOfDate"
+                          },
+                          "unit": "quarter"
+                        }
+                      },
+                      "unit": "quarter",
+                      "amount": 8
+                    }
+                  }
+                ]
+              },
+              {
+                "$lt": [
+                  "$month",
+                  {
+                    "$dateTrunc": {
+                      "date": {
+                        "$param": "asOfDate"
+                      },
+                      "unit": "quarter"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "$group": {
+          "_id": {
+            "$dateTrunc": {
+              "date": "$month",
+              "unit": "quarter"
+            }
+          },
+          "revenueUsd": {
+            "$sum": "$totalUsd"
+          }
+        }
+      },
+      {
+        "$sort": {
+          "_id": 1
+        }
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "revenueUsd": 1,
+          "quarter": {
+            "$concat": [
+              {
+                "$toString": {
+                  "$year": "$_id"
+                }
+              },
+              " Q",
+              {
+                "$toString": {
+                  "$ceil": {
+                    "$divide": [
+                      {
+                        "$month": "$_id"
+                      },
+                      3
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "quarter",
+        "type": "string",
+        "label": "Quarter"
+      },
+      {
+        "name": "revenueUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Revenue"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "bar",
+    "x": "quarter",
+    "y": [
+      "revenueUsd"
+    ],
+    "emphasis": "latest",
+    "headline": "total",
+    "polarity": "higherIsBetter"
+  },
+  "layout": {
+    "span": 7
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

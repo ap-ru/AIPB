@@ -1,0 +1,44 @@
+{
+  "id": "client-revenue-ytd",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Revenue YTD",
+  "description": "Revenue (NII + fees) booked this calendar year for the selected client, compared with the same months last year.",
+  "data": {
+    "query": {
+      "metrics": [
+        "revenueUsd"
+      ],
+      "window": {
+        "type": "ytd"
+      },
+      "compare": "priorYear",
+      "scope": "entity"
+    },
+    "columns": [
+      {
+        "name": "revenueUsd",
+        "label": "Revenue YTD"
+      },
+      {
+        "name": "revenueUsdPrior",
+        "label": "Prior YTD"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "metric",
+    "value": "revenueUsd",
+    "compare": "revenueUsdPrior",
+    "polarity": "higherIsBetter"
+  },
+  "layout": {
+    "span": 3
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

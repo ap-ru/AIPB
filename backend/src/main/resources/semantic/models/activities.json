@@ -1,0 +1,27 @@
+{
+  "id": "activities",
+  "label": "Activities",
+  "version": 1,
+  "description": "Interactions logged by the coverage team over the 180 days before the data's today.",
+  "collection": "activities",
+  "entity": "clientId",
+  "time": { "field": "date", "grain": "month", "closedOnly": false },
+  "dimensions": {
+    "activityType": "type"
+  },
+  "measures": [
+    { "id": "activityCount", "label": "Activities", "agg": "count", "unit": "count", "polarity": "higherIsBetter",
+      "description": "Number of logged interactions." }
+  ],
+  "records": {
+    "key": "activityId",
+    "fields": [
+      { "id": "date", "label": "Date", "field": "date", "type": "date", "unit": "date" },
+      { "id": "type", "label": "Type", "field": "type", "type": "string", "dimension": "activityType" },
+      { "id": "summary", "label": "Summary", "field": "summary", "type": "string" },
+      { "id": "owner", "label": "Owner", "field": "owner", "type": "string" },
+      { "id": "clientName", "label": "Client", "field": "client.name", "type": "string" }
+    ],
+    "defaultSort": [{ "by": "date", "dir": "desc" }]
+  }
+}

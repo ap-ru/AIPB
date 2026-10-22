@@ -1,0 +1,43 @@
+{
+  "id": "client-holdings",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Product holdings",
+  "description": "Every product the selected client holds, with its current amount: drawn balance for credit, balance for deposits, notional for hedges and mandates.",
+  "data": {
+    "query": {
+      "kind": "records",
+      "model": "holdings",
+      "fields": [
+        "productName",
+        "lob",
+        "status",
+        "amountUsd",
+        "committedUsd",
+        "maturityDate"
+      ],
+      "limit": 100,
+      "scope": "entity"
+    }
+  },
+  "view": {
+    "primitive": "table",
+    "columns": [
+      "productName",
+      "lob",
+      "status",
+      "amountUsd",
+      "committedUsd",
+      "maturityDate"
+    ]
+  },
+  "layout": {
+    "span": 12
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0001"
+    }
+  }
+}

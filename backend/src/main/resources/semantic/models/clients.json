@@ -1,0 +1,52 @@
+{
+  "id": "clients",
+  "label": "Clients",
+  "version": 1,
+  "description": "One row per client relationship. The entity model: every model whose rows belong to a client inherits these dimensions (region, industry, tier, ...) through clientId.",
+  "collection": "clients",
+  "entity": "clientId",
+  "entityModel": true,
+  "time": null,
+  "dates": { "nextReview": "nextReviewDate", "relationshipSince": "relationshipSince" },
+  "dimensions": {
+    "client": { "field": "clientId", "display": "name" },
+    "industry": "industry",
+    "region": "region",
+    "tier": "tier",
+    "clientSegment": "segment",
+    "relationshipManager": "relationshipManager",
+    "rating": "internalRatingLabel",
+    "kycStatus": "kycStatus"
+  },
+  "segments": {
+    "atRisk": { "description": "health score below 50", "where": [{ "field": "healthScore", "op": "lt", "value": 50 }] },
+    "kycOverdue": { "description": "KYC overdue", "where": [{ "field": "kycStatus", "op": "eq", "value": "Overdue" }] }
+  },
+  "measures": [
+    { "id": "clientCount", "label": "Clients", "agg": "count", "unit": "count", "polarity": "neutral",
+      "description": "Number of client relationships." },
+    { "id": "walletSizeUsd", "label": "Wallet size", "agg": "sum", "field": "walletSizeUsd", "unit": "USD", "polarity": "neutral",
+      "description": "Estimated total annual banking spend of the client(s) across all banks." },
+    { "id": "avgHealthScore", "label": "Health score", "agg": "avg", "field": "healthScore", "unit": "none", "polarity": "higherIsBetter",
+      "description": "Average relationship health score (0-100; >=75 healthy, 50-74 watch, <50 at risk)." },
+    { "id": "atRiskClients", "label": "Clients at risk", "agg": "count", "segments": ["atRisk"], "unit": "count", "polarity": "lowerIsBetter",
+      "description": "Clients whose health score is below 50." }
+  ],
+  "records": {
+    "key": "clientId",
+    "fields": [
+      { "id": "clientId", "label": "Client id", "field": "clientId", "type": "string" },
+      { "id": "name", "label": "Client", "field": "name", "type": "string" },
+      { "id": "industry", "label": "Industry", "field": "industry", "type": "string" },
+      { "id": "region", "label": "Region", "field": "region", "type": "string", "dimension": "region" },
+      { "id": "tier", "label": "Tier", "field": "tier", "type": "string", "dimension": "tier" },
+      { "id": "relationshipManager", "label": "Relationship manager", "field": "relationshipManager", "type": "string" },
+      { "id": "healthScore", "label": "Health", "field": "healthScore", "type": "number", "unit": "none" },
+      { "id": "rating", "label": "Rating", "field": "internalRatingLabel", "type": "string", "dimension": "rating" },
+      { "id": "kycStatus", "label": "KYC", "field": "kycStatus", "type": "string", "dimension": "kycStatus" },
+      { "id": "walletSizeUsd", "label": "Wallet size", "field": "walletSizeUsd", "type": "number", "unit": "USD" },
+      { "id": "nextReviewDate", "label": "Next review", "field": "nextReviewDate", "type": "date", "unit": "date" }
+    ],
+    "defaultSort": [{ "by": "name", "dir": "asc" }]
+  }
+}

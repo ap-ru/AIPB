@@ -1,0 +1,44 @@
+{
+  "id": "client-covenants",
+  "specVersion": 2,
+  "version": 3,
+  "title": "Covenants",
+  "description": "Financial covenants on the selected client's facilities at the last quarterly test, tightest headroom first.",
+  "data": {
+    "query": {
+      "kind": "records",
+      "model": "covenants",
+      "fields": [
+        "name",
+        "facility",
+        "actual",
+        "operator",
+        "threshold",
+        "headroomPct",
+        "status"
+      ],
+      "scope": "entity"
+    }
+  },
+  "view": {
+    "primitive": "table",
+    "columns": [
+      "name",
+      "facility",
+      "actual",
+      "operator",
+      "threshold",
+      "headroomPct",
+      "status"
+    ]
+  },
+  "layout": {
+    "span": 7
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0002"
+    }
+  }
+}

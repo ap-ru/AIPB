@@ -1,0 +1,141 @@
+{
+  "id": "book-revenue-by-lob-monthly",
+  "version": 1,
+  "title": "Monthly revenue by line of business",
+  "description": "Revenue (NII + fees) across the whole book for each of the last 24 closed months, one line per line of business.",
+  "params": [],
+  "data": {
+    "collection": "revenue_monthly",
+    "pipeline": [
+      {
+        "$group": {
+          "_id": "$month",
+          "corporateBankingUsd": {
+            "$sum": {
+              "$cond": [
+                {
+                  "$eq": [
+                    "$lob",
+                    "Corporate Banking"
+                  ]
+                },
+                "$totalUsd",
+                0
+              ]
+            }
+          },
+          "commercialLendingUsd": {
+            "$sum": {
+              "$cond": [
+                {
+                  "$eq": [
+                    "$lob",
+                    "Commercial Lending"
+                  ]
+                },
+                "$totalUsd",
+                0
+              ]
+            }
+          },
+          "capitalMarketsUsd": {
+            "$sum": {
+              "$cond": [
+                {
+                  "$eq": [
+                    "$lob",
+                    "Capital Markets"
+                  ]
+                },
+                "$totalUsd",
+                0
+              ]
+            }
+          },
+          "globalMarketsUsd": {
+            "$sum": {
+              "$cond": [
+                {
+                  "$eq": [
+                    "$lob",
+                    "Global Markets"
+                  ]
+                },
+                "$totalUsd",
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        "$sort": {
+          "_id": 1
+        }
+      },
+      {
+        "$project": {
+          "_id": 0,
+          "month": "$_id",
+          "corporateBankingUsd": 1,
+          "commercialLendingUsd": 1,
+          "capitalMarketsUsd": 1,
+          "globalMarketsUsd": 1
+        }
+      }
+    ],
+    "columns": [
+      {
+        "name": "month",
+        "type": "date",
+        "unit": "date",
+        "format": "date",
+        "label": "Month"
+      },
+      {
+        "name": "corporateBankingUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Corporate Banking"
+      },
+      {
+        "name": "commercialLendingUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Commercial Lending"
+      },
+      {
+        "name": "capitalMarketsUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Capital Markets"
+      },
+      {
+        "name": "globalMarketsUsd",
+        "type": "number",
+        "unit": "USD",
+        "format": "currency",
+        "label": "Global Markets"
+      }
+    ]
+  },
+  "view": {
+    "primitive": "line",
+    "x": "month",
+    "y": [
+      "corporateBankingUsd",
+      "commercialLendingUsd",
+      "capitalMarketsUsd",
+      "globalMarketsUsd"
+    ]
+  },
+  "layout": {
+    "span": 12
+  },
+  "provenance": {
+    "author": "starter"
+  }
+}

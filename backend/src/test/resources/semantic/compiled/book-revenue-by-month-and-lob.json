@@ -1,0 +1,38 @@
+[ {
+  "purpose" : "Revenue: revenueUsd over last 24 months",
+  "collection" : "revenue_monthly",
+  "pipeline" : [ {
+    "$match" : {
+      "month" : {
+        "$gte" : {
+          "$date" : "2024-10-01T00:00:00Z"
+        },
+        "$lt" : {
+          "$date" : "2026-10-01T00:00:00Z"
+        }
+      }
+    }
+  }, {
+    "$group" : {
+      "_id" : {
+        "month" : {
+          "$dateTrunc" : {
+            "date" : "$month",
+            "unit" : "month"
+          }
+        },
+        "lob" : "$lob"
+      },
+      "m0" : {
+        "$sum" : "$totalUsd"
+      }
+    }
+  }, {
+    "$project" : {
+      "_id" : 0,
+      "month" : "$_id.month",
+      "lob" : "$_id.lob",
+      "m0" : 1
+    }
+  } ]
+} ]
