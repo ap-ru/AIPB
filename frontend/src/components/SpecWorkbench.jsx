@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
-import { LAYOUT_ID } from '../lib/platform.jsx';
+import { LAYOUT_ID, usePlatform } from '../lib/platform.jsx';
 import SpecView from '../widgets/spec/SpecView.jsx';
+import Icon from './Icon.jsx';
 
 /** A starting point that fits the page: client-scoped where the page picks a client, book-wide otherwise. */
 function template(page) {
@@ -55,6 +56,8 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
   const [problem, setProblem] = useState(null);
   const [busy, setBusy] = useState(false);
   const [exists, setExists] = useState(false);
+  const [sent, setSent] = useState(null);
+  const { role } = usePlatform();
 
   const parse = () => {
     try {
@@ -79,15 +82,16 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
   };
 
   const save = async (update) => {
-    setProblem(null);
+    setProblem(null); setSent(null);
     const spec = parse();
     if (!spec) return;
     setBusy(true);
     try {
       const saved = update ? await api.put('/api/widgets/library/' + encodeURIComponent(spec.id), body(spec))
         : await api.post('/api/widgets/library', body(spec));
-      setReport(saved.report);
-      await onPlace(saved);
+      // maker-checker: an approver's save is approved at once and placed; a builder's waits for approval
+      if (saved.status === 'approved') await onPlace(saved);
+      else setSent(`Sent “${saved.title}” for approval${update ? ` as a change to v${saved.baseVersion}` : ''}. It can be placed once an approver approves it; follow it in the assistant's Skills window.`);
     } catch (e) {
       if (e.status === 422 && e.body?.report) setReport(e.body.report);
       else if (e.status === 409) setExists(true);
@@ -107,12 +111,17 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
           <button className="btn" onClick={() => setText(template(page))} disabled={busy}>Reset</button>
           <div className="spacer" style={{ flex: 1 }} />
           <button className="btn" onClick={validate} disabled={busy}>{busy ? 'Working…' : 'Validate'}</button>
-          {exists
-            ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Save as new version & place</button>
-            : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Save to library & place</button>}
+          {role === 'approver'
+            ? exists
+              ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Approve as new version & place</button>
+              : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Approve to library & place</button>
+            : exists
+              ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Submit as a change for approval</button>
+              : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Submit for approval</button>}
         </div>
       </div>
       <div className="stack" style={{ gap: 12, minWidth: 0 }}>
+        {sent && <div className="pv-placed"><Icon name="flag" size={13} /> {sent}</div>}
         {problem && <div className="error-box">⚠ {problem}</div>}
         {!report && !problem && <div className="empty">Validate to check the spec against the real data and see a preview.</div>}
         {report && (

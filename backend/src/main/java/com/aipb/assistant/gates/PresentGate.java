@@ -48,14 +48,20 @@ public class PresentGate {
         spec.put("title", title.length() > 80 ? title.substring(0, 80) : title);
         String desc = design.path("description").asText(title);
         spec.put("description", desc.length() > 400 ? desc.substring(0, 400) : desc);
-        spec.set("params", artifact.path("params"));
-
         ObjectNode data = spec.putObject("data");
-        data.set("collection", artifact.path("collection"));
-        data.set("pipeline", artifact.path("pipeline"));
         ArrayNode columns = artifact.path("columns").deepCopy();
         applyOverrides(columns, design.path("columnOverrides"), errors);
-        data.set("columns", columns);
+        if (artifact.has("query")) {
+            // a semantic query (a library widget being changed): its columns come from the semantic layer, so only
+            // labels and badge tones can be overridden
+            data.set("query", artifact.get("query"));
+            data.set("columns", queryOverrides(artifact, columns));
+        } else {
+            spec.set("params", artifact.path("params"));
+            data.set("collection", artifact.path("collection"));
+            data.set("pipeline", artifact.path("pipeline"));
+            data.set("columns", columns);
+        }
 
         ObjectNode view = spec.putObject("view");
         view.put("primitive", design.path("primitive").asText());
@@ -79,6 +85,27 @@ public class PresentGate {
         if (v.isBoolean()) return !v.asBoolean();
         if (v.isNumber()) return v.asDouble() == 0;
         return false;
+    }
+
+    /** A query's column overrides: the ones it had, with the design's labels and tones on top. */
+    private ArrayNode queryOverrides(JsonNode artifact, ArrayNode columns) {
+        java.util.Map<String, ObjectNode> out = new java.util.LinkedHashMap<>();
+        artifact.path("overrides").forEach(o -> out.put(o.path("name").asText(), (ObjectNode) o.deepCopy()));
+        java.util.Map<String, JsonNode> before = new java.util.HashMap<>();
+        artifact.path("columns").forEach(c -> before.put(c.path("name").asText(), c));
+        for (JsonNode c : columns) {
+            String name = c.path("name").asText();
+            JsonNode was = before.getOrDefault(name, mapper.createObjectNode());
+            boolean relabelled = !c.path("label").asText().equals(was.path("label").asText());
+            boolean retoned = c.has("tones") && !c.get("tones").equals(was.path("tones"));
+            if (!relabelled && !retoned) continue;
+            ObjectNode o = out.computeIfAbsent(name, k -> mapper.createObjectNode().put("name", k));
+            if (relabelled) o.put("label", c.path("label").asText());
+            if (retoned) o.set("tones", c.get("tones"));
+        }
+        ArrayNode arr = mapper.createArrayNode();
+        out.values().forEach(arr::add);
+        return arr;
     }
 
     private static void applyOverrides(ArrayNode columns, JsonNode overrides, List<String> errors) {

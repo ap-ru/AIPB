@@ -17,6 +17,7 @@ import java.util.*;
 public class WidgetController {
 
     private final WidgetLibrary library;
+    private final WidgetWorkflow workflow;
     private final WidgetSpecValidator validator;
     private final WidgetDataService data;
 
@@ -36,17 +37,66 @@ public class WidgetController {
         return m;
     }
 
+    /** A new widget from the workbench: a builder's waits for approval; an approver's is approved as it is saved. */
     @PostMapping("/library")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String, Object> create(@RequestBody SpecRequest req) {
-        WidgetLibrary.Saved s = library.create(required(req), "workbench", req.layoutId(), req.pageId(), req.params());
-        return saved(s);
+    public Map<String, Object> create(@RequestBody SpecRequest req, @RequestHeader(value = Role.HEADER, required = false) String role) {
+        Optional<WidgetSubmission> open = resubmittable(required(req).path("id").asText());
+        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), Role.of(role)));
+        return submitted(workflow.submit(new WidgetWorkflow.Submit(required(req), "workbench", null, req.layoutId(), req.pageId(),
+                req.params(), null), Role.of(role)));
     }
 
+    /** A workbench widget waiting for approval (or sent back) is revised by submitting its id again. */
+    private Optional<WidgetSubmission> resubmittable(String id) {
+        return workflow.openFor(id).filter(s -> "workbench".equals(s.getOrigin()));
+    }
+
+    /** A change to a library widget from the workbench, submitted as its next version. */
     @PutMapping("/library/{id}")
-    public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req) {
-        WidgetLibrary.Saved s = library.update(id, required(req), "workbench", req.layoutId(), req.pageId(), req.params());
-        return saved(s);
+    public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req,
+                                      @RequestHeader(value = Role.HEADER, required = false) String role) {
+        if (!id.equals(required(req).path("id").asText()))
+            throw new IllegalArgumentException("spec id '" + req.spec().path("id").asText() + "' does not match '" + id + "'");
+        Optional<WidgetSubmission> open = resubmittable(id);
+        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), Role.of(role)));
+        return submitted(workflow.submit(new WidgetWorkflow.Submit(req.spec(), "workbench", null, req.layoutId(), req.pageId(),
+                req.params(), id), Role.of(role)));
+    }
+
+    /** A live preview of a library widget outside a page: request values (e.g. clientId) over its sample values. */
+    @GetMapping("/library/{id}/preview")
+    public Map<String, Object> preview(@PathVariable String id, @RequestParam Map<String, String> params) {
+        WidgetDefinition d = library.get(id);
+        return preview(library.spec(d), workflow.preview(library.spec(d), null, null, params));
+    }
+
+    /** Every version of a widget, newest first (approvers only). */
+    @GetMapping("/library/{id}/versions")
+    public List<Map<String, Object>> versions(@PathVariable String id, @RequestHeader(value = Role.HEADER, required = false) String role) {
+        Role.of(role).requireApprover("see a widget's version history");
+        int current = library.get(id).getVersion();
+        return library.history(id).stream().map(v -> version(v, current)).toList();
+    }
+
+    /** One version, with a live preview (approvers only). */
+    @GetMapping("/library/{id}/versions/{version}")
+    public Map<String, Object> version(@PathVariable String id, @PathVariable int version, @RequestParam Map<String, String> params,
+                                       @RequestHeader(value = Role.HEADER, required = false) String role) {
+        Role.of(role).requireApprover("see a widget's version history");
+        WidgetVersion v = library.version(id, version);
+        JsonNode spec = library.spec(v);
+        Map<String, Object> m = version(v, library.get(id).getVersion());
+        m.put("spec", spec);
+        m.putAll(preview(spec, workflow.preview(spec, null, null, params)));
+        return m;
+    }
+
+    /** Makes an older version current again, as the next version (approvers only). */
+    @PostMapping("/library/{id}/versions/{version}/restore")
+    public Map<String, Object> restore(@PathVariable String id, @PathVariable int version,
+                                       @RequestHeader(value = Role.HEADER, required = false) String role) {
+        return summary(workflow.restore(id, version, Role.of(role)));
     }
 
     /**
@@ -96,9 +146,38 @@ public class WidgetController {
         return req.spec();
     }
 
-    private Map<String, Object> saved(WidgetLibrary.Saved s) {
-        Map<String, Object> m = summary(s.definition());
-        m.put("report", s.report());
+    /** A workbench save: the submission, and - when it was approved at once - the widget it became. */
+    private Map<String, Object> submitted(WidgetSubmission s) {
+        Map<String, Object> m = workflow.item(s);
+        m.put("id", s.getWidgetId());
+        m.put("submissionId", s.getId());
+        return m;
+    }
+
+    /** The view to draw a spec with, and the validator's run of it: rows, errors and warnings. */
+    static Map<String, Object> preview(JsonNode spec, ValidationReport r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("view", spec.path("view"));
+        m.put("ok", r.ok());
+        m.put("errors", r.errors());
+        m.put("warnings", r.warnings());
+        m.put("sampleParams", r.sampleParams());
+        m.put("preview", r.preview());
+        return m;
+    }
+
+    private static Map<String, Object> version(WidgetVersion v, int current) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("version", v.getVersion());
+        m.put("current", v.getVersion() == current);
+        m.put("title", v.getTitle());
+        m.put("description", v.getDescription());
+        m.put("primitive", v.getPrimitive());
+        m.put("source", v.getSource());
+        m.put("restoredFrom", v.getRestoredFrom());
+        m.put("submissionId", v.getSubmissionId());
+        m.put("approvedByRole", v.getApprovedByRole());
+        m.put("createdAt", v.getCreatedAt());
         return m;
     }
 
@@ -106,6 +185,7 @@ public class WidgetController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", d.getId());
         m.put("version", d.getVersion());
+        m.put("origin", d.getOrigin());
         m.put("title", d.getTitle());
         m.put("description", d.getDescription());
         m.put("primitive", d.getPrimitive());

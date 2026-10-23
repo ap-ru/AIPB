@@ -33,6 +33,7 @@ public class IntakeStage {
     private final ContextAssembler context;
     private final WidgetDefinitionRepository library;
     private final LayoutService layouts;
+    private final ObjectMapper mapper;
     private final JsonNode schema;
 
     public IntakeStage(StageRunner runner, ContextAssembler context, WidgetDefinitionRepository library, LayoutService layouts,
@@ -41,6 +42,7 @@ public class IntakeStage {
         this.context = context;
         this.library = library;
         this.layouts = layouts;
+        this.mapper = mapper;
         try (InputStream in = new ClassPathResource("assistant/schemas/intake.json").getInputStream()) {
             this.schema = mapper.readTree(in);
         } catch (IOException e) {
@@ -60,11 +62,24 @@ public class IntakeStage {
         sb.append(context.page(s.getLayoutId(), s.getPageId(), s.getParams()));
         sb.append(context.dataToday());
         sb.append(context.library());
+        if (s.getModifies() != null) {
+            sb.append("<modifying>\nThe banker is changing the library widget '").append(s.getModifies()).append("' (\"")
+                    .append(s.getModifiesTitle()).append("\", v").append(s.getModifiesVersion()).append("). Treat every request as a ")
+                    .append("revision of it: return its brief with only the asked change and list the changed aspects in `changed`. ")
+                    .append("Never choose `reuse` or `answer` pointing at this widget - it is the one being changed.\n");
+            if (s.getBrief() == null) sb.append("Its current definition (write the brief it answers, then apply the change):\n")
+                    .append(definition(s.getBaseSpec())).append('\n');
+            sb.append("</modifying>\n");
+        }
         if (s.getBrief() != null) {
             sb.append("<current_widget>\nThe banker is working on this widget (a revision changes it; a new subject is a new widget).\nbrief: ")
                     .append(s.getBrief()).append('\n');
             if (s.getView() != null) sb.append("display: ").append(s.getView()).append('\n');
             sb.append("review: ").append(s.getReviewState()).append("\n</current_widget>\n");
+        }
+        if (s.getApproverFeedback() != null) {
+            sb.append("<approver_feedback>\nAn approver sent this widget back. Revise it to address this, together with the banker's message:\n")
+                    .append(s.getApproverFeedback()).append("\n</approver_feedback>\n");
         }
         // the turns before the latest message (which is the last turn)
         List<AssistantSession.Turn> turns = s.getTurns();
@@ -74,13 +89,26 @@ public class IntakeStage {
             sb.append("<conversation>\n");
             for (int i = from; i < end; i++) {
                 AssistantSession.Turn t = turns.get(i);
-                sb.append(t.getRole().equals("user") ? "Banker: " : "Assistant: ").append(t.getText()).append('\n');
+                sb.append(switch (t.getRole()) { case "user" -> "Banker: "; case "approver" -> "Approver: "; default -> "Assistant: "; })
+                        .append(t.getText()).append('\n');
             }
             sb.append("</conversation>\n");
         }
         sb.append("<banker_message>\n").append(bankerMessage).append("\n</banker_message>\n\n");
         sb.append("Decide the outcome for the banker's message.");
         return sb.toString();
+    }
+
+    /** What a widget shows and how, from its spec - without the provenance. */
+    private String definition(String spec) {
+        try {
+            JsonNode n = mapper.readTree(spec);
+            com.fasterxml.jackson.databind.node.ObjectNode out = mapper.createObjectNode();
+            for (String k : List.of("title", "description", "data", "view", "layout")) if (n.has(k)) out.set(k, n.get(k));
+            return out.toPrettyString();
+        } catch (IOException | RuntimeException e) {
+            return spec;
+        }
     }
 
     List<String> gate(JsonNode out, AssistantSession s) {
@@ -91,6 +119,7 @@ public class IntakeStage {
             case "reuse" -> {
                 String id = out.path("reuseDefinitionId").asText("");
                 if (!library.existsById(id)) errors.add("reuseDefinitionId '" + id + "' is not in the library; reuse only a listed widget, or choose another outcome");
+                else if (id.equals(s.getModifies())) errors.add("'" + id + "' is the widget being changed; return its revised brief (proceed) instead of reusing it");
             }
             case "proceed" -> {
                 JsonNode brief = out.path("brief");

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePlatform, LAYOUT_ID } from '../lib/platform.jsx';
 import { api } from '../lib/api.js';
 import { useApi } from '../lib/useApi.js';
@@ -221,9 +221,19 @@ export default function DynamicPage() {
   // The chat stays mounted once opened, so going back to the dashboard keeps the conversation.
   const [chatOpened, setChatOpened] = useState(false);
   const nav = useNavigate();
+  const location = useLocation();
   const page = layout?.pages.find((p) => p.id === pageId);
   const params = usePageParams(page);
   const showChat = assisting && params.ready && Boolean(page);
+  // a conversation opened from Skills on another page arrives in the navigation state
+  const openSessionId = location.state?.assistantSession;
+  useEffect(() => { if (openSessionId) { setAssisting(true); setChatOpened(true); } }, [openSessionId]);
+  const openElsewhere = (targetPage, sessionId, sessionParams) => {
+    const target = layout.pages.find((p) => p.id === targetPage);
+    const q = new URLSearchParams();
+    (target?.params || []).forEach((p) => { if (sessionParams?.[p.name]) q.set(p.name, sessionParams[p.name]); });
+    nav('/page/' + targetPage + (q.toString() ? '?' + q : ''), { state: { assistantSession: sessionId } });
+  };
   useEffect(() => { setAssistantOpen(showChat); }, [showChat, setAssistantOpen]);
   useEffect(() => () => setAssistantOpen(false), [setAssistantOpen]);
   if (!layout) return <Loading label="Loading layout" />;
@@ -269,7 +279,8 @@ export default function DynamicPage() {
       )}
       {chatOpened && params.ready && (
         <div className="chat-host" hidden={!showChat}>
-          <AssistantChat page={page} pageParams={params.values} toolbar={<ParamPickers params={params} />} onClose={() => setAssisting(false)} />
+          <AssistantChat page={page} pageParams={params.values} toolbar={<ParamPickers params={params} />} onClose={() => setAssisting(false)}
+            openSessionId={openSessionId} onElsewhere={openElsewhere} />
         </div>
       )}
     </>

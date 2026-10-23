@@ -1,6 +1,7 @@
 package com.aipb.assistant;
 
 import com.aipb.assistant.llm.LlmGateway;
+import com.aipb.widget.Role;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +32,8 @@ public class AssistantController {
     private final ObjectMapper mapper;
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
-    public record CreateRequest(String layoutId, String pageId, Map<String, String> params) {}
+    /** {@code modifies}: a library widget id, to start a conversation that changes it. */
+    public record CreateRequest(String layoutId, String pageId, Map<String, String> params, String modifies) {}
     public record MessageRequest(String text, Map<String, String> params) {}
     public record ApproveRequest(Boolean confirmUnverified) {}
 
@@ -43,6 +45,8 @@ public class AssistantController {
     @PostMapping("/sessions")
     public Map<String, Object> create(@RequestBody CreateRequest req) {
         if (req == null || req.pageId() == null) throw new IllegalArgumentException("pageId is required");
+        if (req.modifies() != null && !req.modifies().isBlank())
+            return view(orchestrator.createModify(req.layoutId(), req.pageId(), req.params(), req.modifies()));
         return view(orchestrator.create(req.layoutId(), req.pageId(), req.params()));
     }
 
@@ -61,9 +65,11 @@ public class AssistantController {
         return stream(events -> orchestrator.verify(id, events));
     }
 
-    @PostMapping("/sessions/{id}/approve")
-    public Map<String, Object> approve(@PathVariable String id, @RequestBody(required = false) ApproveRequest req) {
-        return orchestrator.approve(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()));
+    /** Sends the proposal for approval (an approver's is approved), or places a widget reused from the library. */
+    @PostMapping("/sessions/{id}/submit")
+    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) ApproveRequest req,
+                                      @RequestHeader(value = Role.HEADER, required = false) String role) {
+        return orchestrator.submit(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()), Role.of(role));
     }
 
     /** The inspector: every stage run with its model, effort, tokens, cost, tool calls and context manifest. */
@@ -106,6 +112,14 @@ public class AssistantController {
         m.put("turns", s.getTurns());
         m.put("proposal", json(s.getProposal()));
         m.put("placedDefinitionId", s.getPlacedDefinitionId());
+        m.put("submissionId", s.getSubmissionId());
+        m.put("approval", s.getApproval());
+        m.put("approvedVersion", s.getApprovedVersion());
+        m.put("approverFeedback", s.getApproverFeedback());
+        m.put("modifies", s.getModifies());
+        m.put("modifiesVersion", s.getModifiesVersion());
+        m.put("modifiesTitle", s.getModifiesTitle());
+        m.put("earlier", s.getEarlier());
         double cost = s.getRuns().stream().mapToDouble(r -> r.getCostUsd() == null ? 0 : r.getCostUsd()).sum();
         m.put("costUsd", Math.round(cost * 10000) / 10000.0);
         return m;

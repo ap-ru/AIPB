@@ -43,6 +43,7 @@ class AssistantOrchestratorTest {
     private WidgetSpecValidator validator;
     private WidgetDefinitionRepository definitions;
     private WidgetLibrary library;
+    private WidgetWorkflow workflow;
     private WidgetPlacement placement;
     private WidgetDataService widgetData;
     private AssistantProperties props;
@@ -72,12 +73,13 @@ class AssistantOrchestratorTest {
         when(sessions.save(any())).thenAnswer(i -> { AssistantSession s = i.getArgument(0); store.put(s.getId(), s); return s; });
         when(sessions.findById(anyString())).thenAnswer(i -> Optional.ofNullable(store.get((String) i.getArgument(0))));
 
+        workflow = mock(WidgetWorkflow.class);
         orchestrator = new AssistantOrchestrator(sessions,
                 new IntakeStage(runner, context, definitions, layouts, mapper),
                 new BuildStage(runner, context, tools, new BuildGate(validator, context, mapper)),
                 mock(ReviewStage.class),
                 new PresentStage(runner, context, new PresentGate(validator, mapper), props, mapper),
-                new ProposalBuilder(mapper, widgetData), library, definitions, placement, props, mapper);
+                new ProposalBuilder(mapper, widgetData), library, workflow, definitions, placement, layouts, props, mapper);
     }
 
     // ------------------------------------------------------------------ scripts
@@ -261,22 +263,182 @@ class AssistantOrchestratorTest {
     }
 
     @Test
-    void approvingSavesToTheLibraryWithProvenanceAndPlacesIt() {
+    void aBuilderSubmitsForApprovalWithProvenanceAndNothingIsPlaced() {
         claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
         String id = newSession();
         orchestrator.message(id, "revenue by quarter", null, recorder);
-        when(definitions.existsById("quarterly-revenue")).thenReturn(true); // taken: the new widget gets a suffix
-        WidgetDefinition saved = new WidgetDefinition();
-        saved.setId("quarterly-revenue-2");
-        when(library.create(any(), eq("assistant"), any(), any(), any())).thenReturn(new WidgetLibrary.Saved(saved, ok()));
+        when(workflow.idTaken("quarterly-revenue")).thenReturn(true); // taken: the new widget gets a suffix
+        when(workflow.submit(any(), eq(Role.BUILDER))).thenReturn(submission("sub-1", "quarterly-revenue-2", WidgetSubmission.PENDING, null));
 
-        orchestrator.approve(id, false);
+        orchestrator.submit(id, false, Role.BUILDER);
 
-        verify(library).create(argThat(spec -> spec.path("id").asText().equals("quarterly-revenue-2")
-                && spec.path("provenance").path("reviewed").asText().equals("none")
-                && spec.path("provenance").path("question").asText().contains("revenue")), eq("assistant"), eq("default"), eq("client"), any());
-        verify(placement).placeDefinition("default", "client", "quarterly-revenue-2", "assistant");
-        assertThat(store.get(id).getStatus()).isEqualTo(AssistantSession.PLACED);
+        verify(workflow).submit(argThat(r -> r.spec().path("id").asText().equals("quarterly-revenue-2")
+                && r.modifies() == null && r.sessionId().equals(id) && r.pageId().equals("client")
+                && r.spec().path("provenance").path("reviewed").asText().equals("none")
+                && r.spec().path("provenance").path("question").asText().contains("revenue")), eq(Role.BUILDER));
+        verifyNoInteractions(placement);
+        AssistantSession s = store.get(id);
+        assertThat(s.getSubmissionId()).isEqualTo("sub-1");
+        assertThat(s.getApproval()).isEqualTo(WidgetSubmission.PENDING);
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getKind()).isEqualTo("submitted");
+    }
+
+    @Test
+    void anApproversWidgetIsApprovedAsItIsSubmitted() {
+        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        String id = newSession();
+        orchestrator.message(id, "revenue by quarter", null, recorder);
+        when(workflow.submit(any(), eq(Role.APPROVER))).thenReturn(submission("sub-1", "quarterly-revenue", WidgetSubmission.APPROVED, 1));
+
+        orchestrator.submit(id, false, Role.APPROVER);
+
+        AssistantSession s = store.get(id);
+        assertThat(s.getApproval()).isEqualTo(WidgetSubmission.APPROVED);
+        assertThat(s.getApprovedVersion()).isEqualTo(1);
+        assertThat(s.getPlacedDefinitionId()).isEqualTo("quarterly-revenue");
+        verifyNoInteractions(placement);
+    }
+
+    @Test
+    void aSendBackReachesTheConversationAndTheNextRevisionCarriesTheFeedbackAndResubmits() {
+        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        String id = newSession();
+        orchestrator.message(id, "revenue by quarter", null, recorder);
+        WidgetSubmission sub = submission("sub-1", "quarterly-revenue", WidgetSubmission.PENDING, null);
+        when(workflow.submit(any(), eq(Role.BUILDER))).thenReturn(sub);
+        orchestrator.submit(id, false, Role.BUILDER);
+
+        // the approver sends it back from Skills
+        WidgetSubmission sent = submission("sub-1", "quarterly-revenue", WidgetSubmission.CHANGES_REQUESTED, null);
+        sent.setSessionId(id);
+        orchestrator.onDecision(new WidgetWorkflow.Decision(sent, "sent_back", Role.APPROVER, "Show 12 quarters, not 8"));
+        AssistantSession s = store.get(id);
+        assertThat(s.getApproval()).isEqualTo(WidgetSubmission.CHANGES_REQUESTED);
+        assertThat(s.getApproverFeedback()).isEqualTo("Show 12 quarters, not 8");
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getRole()).isEqualTo("approver");
+
+        // the builder revises: intake and build both see the feedback
+        claude.requests.clear();
+        claude.on("intake", FakeGateway.json(BRIEF.replace("\"changed\":[]", "\"changed\":[\"window\"]")))
+              .on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        orchestrator.message(id, "ok, fix that", null, recorder);
+        String intakeContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(0).messages().get(0)).blocks().get(0)).text();
+        String buildContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(0)).blocks().get(0)).text();
+        assertThat(intakeContext).contains("<approver_feedback>").contains("Show 12 quarters").contains("Approver: Sent back");
+        assertThat(buildContext).contains("Show 12 quarters");
+
+        when(workflow.get("sub-1")).thenReturn(sent);
+        when(workflow.resubmit(eq("sub-1"), any(), eq(Role.BUILDER))).thenReturn(sub);
+        orchestrator.submit(id, false, Role.BUILDER);
+        verify(workflow).resubmit(eq("sub-1"), any(), eq(Role.BUILDER));
+        assertThat(store.get(id).getApproverFeedback()).isNull();
+    }
+
+    @Test
+    void modifyingAStockWidgetStartsFromItsSpecAndADisplayChangeKeepsItsQuery() throws Exception {
+        JsonNode stock = mapper.readTree(Path.of("src/main/resources/widgets/starter/client-revenue-by-lob.json").toFile());
+        WidgetDefinition d = new WidgetDefinition();
+        d.setId("client-revenue-by-lob");
+        d.setTitle("Revenue by line of business");
+        d.setVersion(4);
+        d.setParams(List.of("clientId"));
+        when(library.get("client-revenue-by-lob")).thenReturn(d);
+        when(library.spec(d)).thenReturn(stock);
+        when(library.sampleParams(any())).thenReturn(Map.of("clientId", "CL-0001"));
+        when(workflow.openFor(any())).thenReturn(Optional.empty());
+        JsonNode rows = readUnchecked("[{\"lob\":\"Treasury\",\"revenueUsd\":2700000}]");
+        List<com.aipb.semantic.ResultSet.Column> cols = List.of(
+                new com.aipb.semantic.ResultSet.Column("lob", "Line of business", "string", null, null, null, null, null, null, null, null, null),
+                new com.aipb.semantic.ResultSet.Column("revenueUsd", "Revenue", "number", "USD", "currency", null, null, null, null, null, null, null));
+        when(workflow.preview(any(), any(), any(), any())).thenReturn(new ValidationReport(true, List.of(), List.of(), Map.of("clientId", "CL-0001"),
+                new ValidationReport.Preview(cols, rows, 1, 1, false, "2026-10-16T00:00:00.000Z", List.of())));
+
+        AssistantSession s = orchestrator.createModify("default", "client", Map.of("clientId", "CL-0002"), "client-revenue-by-lob");
+        assertThat(s.getModifies()).isEqualTo("client-revenue-by-lob");
+        assertThat(s.getModifiesVersion()).isEqualTo(4);
+        assertThat(read(s.getData()).path("query").path("metrics").get(0).asText()).isEqualTo("revenueUsd");
+
+        String design = """
+                {"title":"Revenue by line of business","description":"Revenue split by line of business.","primitive":"bar",
+                 "roles":{"value":null,"compare":null,"secondary":null,"x":"lob","y":["revenueUsd"],"orientation":null,"stacked":null,
+                          "columns":null,"title":null,"subtitle":null,"badge":null,"meta":null},"span":6,
+                 "columnOverrides":[{"name":"lob","label":"LOB","badgeTones":[]}]}""";
+        claude.on("intake", FakeGateway.json(BRIEF.replace("\"changed\":[]", "\"changed\":[\"presentation\"]")))
+              .on("present", FakeGateway.json(design));
+        orchestrator.message(s.getId(), "make it a bar chart", null, recorder);
+
+        String intakeContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(0).messages().get(0)).blocks().get(0)).text();
+        assertThat(intakeContext).contains("<modifying>").contains("client-revenue-by-lob").contains("Never choose `reuse`");
+        assertThat(claude.stagesCalled()).containsExactly("intake", "present"); // no rebuild of the data
+        JsonNode p = read(store.get(s.getId()).getProposal());
+        assertThat(p.path("modifies").asText()).isEqualTo("client-revenue-by-lob");
+        JsonNode data = p.path("spec").path("data");
+        assertThat(data.path("query").path("dimensions").get(0).asText()).isEqualTo("lob");
+        assertThat(data.has("pipeline")).isFalse();
+        assertThat(data.path("columns").toString()).contains("\"label\":\"LOB\"").doesNotContain("currency");
+
+        when(workflow.submit(any(), eq(Role.BUILDER))).thenReturn(submission("sub-2", "client-revenue-by-lob", WidgetSubmission.PENDING, null));
+        orchestrator.submit(s.getId(), false, Role.BUILDER);
+        verify(workflow).submit(argThat(r -> "client-revenue-by-lob".equals(r.modifies())), eq(Role.BUILDER));
+    }
+
+    @Test
+    void modifyingCarriesTheEarlierConversationsOldestFirst() {
+        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        String first = newSession();
+        orchestrator.message(first, "revenue by quarter", null, recorder);
+        AssistantSession made = store.get(first);
+        made.setApprovedVersion(1);
+        // an earlier modify conversation that itself carried an older one
+        made.getEarlier().add(new AssistantSession.Earlier("older", null, "Older", List.of()));
+
+        WidgetDefinition d = new WidgetDefinition();
+        d.setId("quarterly-revenue");
+        d.setTitle("Quarterly revenue");
+        d.setVersion(1);
+        d.setParams(List.of("clientId"));
+        when(library.get("quarterly-revenue")).thenReturn(d);
+        when(library.spec(d)).thenReturn(readUnchecked("{\"id\":\"quarterly-revenue\",\"provenance\":{\"sessionId\":\"" + first + "\"}}"));
+        when(workflow.openFor(any())).thenReturn(Optional.empty());
+
+        AssistantSession s = orchestrator.createModify("default", "client", Map.of("clientId", "CL-0002"), "quarterly-revenue");
+
+        assertThat(s.getEarlier()).extracting(AssistantSession.Earlier::getSessionId).containsExactly("older", first);
+        AssistantSession.Earlier e = s.getEarlier().get(1);
+        assertThat(e.getVersion()).isEqualTo(1);
+        assertThat(e.getTitle()).isEqualTo("Quarterly revenue");
+        assertThat(e.getTurns()).extracting(AssistantSession.Turn::getText).contains("revenue by quarter");
+        assertThat(s.getBrief()).isEqualTo(made.getBrief()); // and the assistant starts from what it built
+    }
+
+    @Test
+    void aReusedLibraryWidgetIsPlacedWithoutApproval() {
+        claude.on("intake", FakeGateway.json("""
+                {"outcome":"reuse","message":"There's already one.","reuseDefinitionId":"client-revenue-ytd","changed":[],"brief":null}"""));
+        WidgetDefinition d = new WidgetDefinition();
+        d.setId("client-revenue-ytd");
+        d.setTitle("Revenue YTD");
+        when(definitions.existsById("client-revenue-ytd")).thenReturn(true);
+        when(definitions.findById("client-revenue-ytd")).thenReturn(Optional.of(d));
+        when(widgetData.data(eq("client-revenue-ytd"), any())).thenReturn(new WidgetDataService.DataResult(List.of(), mapper.createArrayNode(), 0, 0, false, "2026-10-16", Map.of(), List.of(), null));
+        when(widgetData.spec("client-revenue-ytd")).thenReturn(spec());
+        String id = newSession();
+        orchestrator.message(id, "revenue this year", null, recorder);
+
+        orchestrator.submit(id, false, Role.BUILDER);
+
+        verify(placement).placeDefinition("default", "client", "client-revenue-ytd", "assistant");
+        verifyNoInteractions(workflow);
+    }
+
+    private WidgetSubmission submission(String id, String widgetId, String status, Integer version) {
+        WidgetSubmission s = new WidgetSubmission();
+        s.setId(id);
+        s.setWidgetId(widgetId);
+        s.setTitle("Quarterly revenue");
+        s.setStatus(status);
+        s.setApprovedVersion(version);
+        return s;
     }
 
     // ------------------------------------------------------------------ helpers

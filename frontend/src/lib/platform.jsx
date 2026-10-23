@@ -1,8 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api } from './api.js';
+import { api, setApiRole } from './api.js';
 
 const Ctx = createContext(null);
 export const LAYOUT_ID = 'default';
+
+const ROLE_KEY = 'aipb.role';
+function savedRole() {
+  try { return localStorage.getItem(ROLE_KEY) === 'approver' ? 'approver' : 'builder'; } catch (e) { return 'builder'; }
+}
+setApiRole(savedRole());
 
 /**
  * Platform context: holds the dynamic layout (pages + widgets) fetched from MongoDB via the API,
@@ -19,6 +25,13 @@ export function PlatformProvider({ children }) {
   const [manifest, setManifest] = useState(null);
   // True while a page shows the full-page assistant; the shell collapses the sidebar to a rail.
   const [assistantOpen, setAssistantOpen] = useState(false);
+  // Maker-checker role: a builder's widgets wait for approval; an approver approves (and their own are approved as saved).
+  const [role, setRoleState] = useState(savedRole);
+  const setRole = useCallback((r) => {
+    setApiRole(r);
+    try { localStorage.setItem(ROLE_KEY, r); } catch (e) { /* private mode: the role lasts for this tab */ }
+    setRoleState(r);
+  }, []);
 
   const loadLayout = useCallback(() => {
     api.get('/api/layouts/' + LAYOUT_ID).then(setLayout).catch(setError);
@@ -40,7 +53,7 @@ export function PlatformProvider({ children }) {
   }, []);
 
   const value = useMemo(() => ({
-    layout, setLayout, error, tick, refresh, status, source, manifest, loadLayout, assistantOpen, setAssistantOpen,
+    layout, setLayout, error, tick, refresh, status, source, manifest, loadLayout, assistantOpen, setAssistantOpen, role, setRole,
     addWidget: (pageId, widget) => layoutCall(api.post(`/api/layouts/${LAYOUT_ID}/pages/${pageId}/widgets`, widget)),
     removeWidget: (pageId, widgetId) => layoutCall(api.del(`/api/layouts/${LAYOUT_ID}/pages/${pageId}/widgets/${widgetId}`)),
     updateWidget: (pageId, widgetId, patch) => layoutCall(api.patch(`/api/layouts/${LAYOUT_ID}/pages/${pageId}/widgets/${widgetId}`, patch)),
@@ -48,7 +61,7 @@ export function PlatformProvider({ children }) {
     addPage: (page) => layoutCall(api.post(`/api/layouts/${LAYOUT_ID}/pages`, page)),
     deletePage: (pageId, force = false) => layoutCall(api.del(`/api/layouts/${LAYOUT_ID}/pages/${pageId}${force ? '?force=true' : ''}`)),
     resetLayout: () => layoutCall(api.post(`/api/layouts/${LAYOUT_ID}/reset`)),
-  }), [layout, error, tick, refresh, status, source, manifest, loadLayout, assistantOpen, layoutCall]);
+  }), [layout, error, tick, refresh, status, source, manifest, loadLayout, assistantOpen, role, setRole, layoutCall]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

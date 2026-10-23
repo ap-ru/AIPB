@@ -2,7 +2,9 @@ package com.aipb.web;
 
 import com.aipb.assistant.AssistantOrchestrator;
 import com.aipb.source.SourceException;
+import com.aipb.widget.Role;
 import com.aipb.widget.WidgetLibrary;
+import com.aipb.widget.WidgetWorkflow;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -40,7 +42,12 @@ public class ApiErrors {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", String.valueOf(e.getMessage())));
     }
 
-    @ExceptionHandler({AssistantOrchestrator.BusyException.class, AssistantOrchestrator.ConfirmationRequired.class})
+    @ExceptionHandler(Role.Forbidden.class)
+    public ResponseEntity<Map<String, String>> forbidden(Role.Forbidden e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", String.valueOf(e.getMessage())));
+    }
+
+    @ExceptionHandler({AssistantOrchestrator.BusyException.class, AssistantOrchestrator.ConfirmationRequired.class, WidgetWorkflow.Conflict.class})
     public ResponseEntity<Map<String, String>> conflict(RuntimeException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", String.valueOf(e.getMessage())));
     }

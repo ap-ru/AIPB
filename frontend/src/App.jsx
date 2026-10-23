@@ -5,6 +5,21 @@ import DynamicPage from './pages/DynamicPage.jsx';
 import Client360Page from './pages/Client360Page.jsx';
 import Icon from './components/Icon.jsx';
 
+/** Builder / Approver: who is acting in the maker-checker flow (a demo stand-in for sign-in). */
+function RoleToggle() {
+  const { role, setRole } = usePlatform();
+  return (
+    <div className="role-toggle" role="radiogroup" aria-label="Acting as">
+      {[['builder', 'Builder', 'B'], ['approver', 'Approver', 'A']].map(([k, label, short]) => (
+        <button key={k} role="radio" aria-checked={role === k} className={role === k ? 'active' : ''} onClick={() => setRole(k)}
+          title={k === 'builder' ? 'Builder: your widgets go for approval' : 'Approver: approve widgets; yours are approved as you save them'}>
+          <span className="nav-label">{label}</span><span className="role-short" aria-hidden="true">{short}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Sidebar() {
   const { layout, error, source, assistantOpen } = usePlatform();
   const [logoOk, setLogoOk] = useState(true);
@@ -27,6 +42,8 @@ function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-foot">
+        <div className="label nav-label" style={{ marginBottom: 6 }}>Acting as</div>
+        <RoleToggle />
         {layout && !error
           ? <div className="row" title="Connected"><span className="dot" /> <span className="nav-label">CONNECTED</span></div>
           : <div className="row"><span className="dot" style={{ background: 'var(--red)' }} /> <span className="nav-label">{error ? 'API UNREACHABLE' : 'CONNECTING…'}</span></div>}

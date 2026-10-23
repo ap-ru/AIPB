@@ -48,13 +48,37 @@ public class AssistantSession {
     private String reviewState = "none"; // none | passed | failed
 
     private List<StageRun> runs = new ArrayList<>();
-    private String placedDefinitionId;
+    private String placedDefinitionId;  // a reused widget placed on the page, or the widget an approval produced
+
+    // maker-checker: the submission this conversation's widget went to, and where it stands
+    private String submissionId;
+    private String approval;            // null until submitted, then the submission's status (pending, changes_requested, approved, rejected)
+    private Integer approvedVersion;
+    private String approverFeedback;    // the latest send-back comment, until the widget is resubmitted
+
+    // modifying a library widget: which one, from which version, and its spec then
+    private String modifies;
+    private Integer modifiesVersion;
+    private String modifiesTitle;
+    private String baseSpec;
+    /** The conversations that made the earlier versions of the widget being modified, oldest first (read-only history). */
+    private List<Earlier> earlier = new ArrayList<>();
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Earlier {
+        private String sessionId;
+        private Integer version;   // the version that conversation's widget was approved as
+        private String title;
+        private List<Turn> turns;
+    }
     private Instant createdAt;
     private Instant updatedAt;
 
     @Data @NoArgsConstructor @AllArgsConstructor
     public static class Turn {
-        private String role;   // user | assistant
+        private String role;   // user | assistant | approver
         private String text;
         private String kind;   // message | clarify | answer | decline | reuse | proposal | error
         private Instant at;
