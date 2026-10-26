@@ -4,13 +4,13 @@ A command center for Commercial Banking whose pages and widgets are defined by a
 
 The project is being rebuilt from first principles. Before an AI can create a widget, it needs three things:
 
-1. **Where the data comes from**: MongoDB, reached through an MCP server.
+1. **Where the data comes from**: MongoDB, read directly by the pages and explored by the assistant through an MCP server.
 2. **What the data means**: collections, fields, units, relationships and how metrics are derived.
 3. **How a widget should look**: a shared design system, so generated widgets look consistent on a page.
 
 The foundation for all three is in place:
 - a synthetic **source database** (`bank`) with a machine-readable **data dictionary**;
-- a read-only MongoDB MCP server, the single gateway to that data, locked to `bank` by MongoDB auth;
+- read-only access to that data, locked to `bank` by MongoDB auth: the MongoDB driver for what pages show, a MongoDB MCP server for the assistant;
 - **declarative widget specs**, drawn by a small set of **design-system primitives** and checked by a **validator** against the real data before they can be saved.
 
 The **widget assistant** (Claude) builds widgets from a plain request, with the same specs and the same validator as the workbench. A banker approves every widget before it is added.
@@ -80,15 +80,16 @@ This database stands in for the bank's system of record. It is **normalized**: e
 - **Generator.** [data/generate.js](data/generate.js) is a mongosh script with no dependencies. The output is deterministic (a seeded PRNG, with dates relative to the run day). Hidden per-client drivers keep the story consistent: a stressed client has tighter covenants, higher utilization, more risk signals and a lower health score.
 - **Self-checks.** The generator fails the run if a foreign key dangles, if a covenant's status disagrees with its headroom, if drawn exceeds committed, or if probability doesn't match stage. It also fails if the dictionary and the data disagree, field by field.
 
-### MCP access
+### Source access: direct for pages, MCP for the assistant
 
-The official MongoDB MCP server runs as the `mcp` service in the stack. It is the **single gateway to the source data** and is used in two ways:
+The source data is read two ways, both as `bank_reader` (read-only on `bank`):
 
-- **Widgets at render time:** the backend calls `aggregate` / `find` to get a widget's data.
-- **The AI assistant while it designs a widget:** it reads `_catalog`, the collection list, inferred schemas and sample documents to understand what data exists.
+- **Pages at render time** (widget data, page parameter choices, filter values): the backend reads MongoDB **directly with the driver**. No MCP is involved in showing data.
+- **The AI assistant while it designs a widget:** it reads `_catalog`, the collection list, inferred schemas and sample documents, and tests queries, through the official **MongoDB MCP server** (the `mcp` service).
 
 ```
- browser ──/api──► backend ── SourceData ──HTTP──► mcp (:3000, read-only) ──► mongo/bank
+ browser ──/api──► backend ── DirectSource ──driver──────────────────────────────► mongo/bank
+                           └─ SourceData ──HTTP──► mcp (:3000, read-only) ──► mongo/bank   (assistant only)
  Claude Code ────────────── .mcp.json ──HTTP──► localhost:3001 ┘
 ```
 
@@ -102,11 +103,13 @@ How the server is configured (`docker-compose.yml`):
 | `MDB_MCP_TRANSPORT=http`, `HTTP_RESPONSE_TYPE=json` | One long-running server shared by the backend and Claude Code. Plain JSON responses. |
 | `ports: 127.0.0.1:3001:3000` | Reachable from this machine only. |
 
-**Backend.** [`com.aipb.source`](backend/src/main/java/com/aipb/source/) holds the app side of the connection:
+**Backend.** [`com.aipb.source`](backend/src/main/java/com/aipb/source/) holds the app side of both connections, behind one interface, `SourceReader` (`aggregate`, `find`, `asOfDate`):
 
+- **`DirectSource`:** the driver, with its own client logged in as `bank_reader` (`aipb.source.uri`), separate from the app's `aipb` connection. It is the primary `SourceReader`, so `WidgetDataService`, `QueryExecutor` and `ContextResolver` use it. It applies the same caps as the MCP server (`aipb.source.max-documents` 1000, `max-time-ms` 10000) and refuses `$out` / `$merge`.
+- **`SourceData`:** the same interface over MCP, used by the assistant (`AssistantTools`, `ContextAssembler`) and for the catalog checks (validator, semantic-model check at startup).
 - **`McpClient`:** MCP over HTTP. It opens a session lazily, reopens it if the server expires it, and turns tool errors into `SourceException` (HTTP 503) carrying the server's reason.
-- **`SourceData`:** the one gateway the rest of the app uses. Every call is pinned to `aipb.source.database` (`bank`). Results are plain JSON: Extended JSON dates and numbers are flattened by `Ejson`. Each `Result` carries `count`, `total` and `truncated`, so a widget never shows a capped result as complete.
-- **`GET /api/source/status`:** reports the connection, tools, collections and dictionary size. The sidebar shows it as `SOURCE · MCP · bank`.
+- **Same results either way.** Every call is pinned to `aipb.source.database` (`bank`). Results are plain JSON: `Ejson` flattens Extended JSON from MCP and BSON from the driver identically (`DirectSourceLiveTest` checks this against the running stack). Each `Result` carries `count`, `total` and `truncated`, so a widget never shows a capped result as complete.
+- **`GET /api/source/status`:** reports the direct connection (collections, dictionary size, asOfDate) and, under `mcp`, the MCP server and its tools. The sidebar shows it as `SOURCE · bank`.
 
 **Claude Code.** [.mcp.json](.mcp.json) points to `http://localhost:3001/mcp`. With the stack running, approve the `mongodb` server, then use `find` / `aggregate` / `collection-schema` with `connectionId: "preconfigured"` and `database: "bank"`.
 
@@ -116,12 +119,12 @@ MongoDB authentication is on, and each part of the system has an account that ca
 
 | Account | Access | Used by |
 |---|---|---|
-| `bank_reader` | `read` on `bank` | the MCP server, so widgets at runtime and the assistant exploring data |
+| `bank_reader` | `read` on `bank` | the backend's direct reads (widgets at runtime) and the MCP server (the assistant exploring data) |
 | `bank_writer` | `readWrite` on `bank` | the data generator only |
 | `aipb_app` | `readWrite` on `aipb` | the backend (layouts and the demo book) |
 | `root` | administration | nothing in the stack |
 
-This is the lock on the data source. It does not depend on our code: whatever a client sends the MCP server, MongoDB refuses anything outside `bank`. For example, reading `aipb.layouts` or `admin` fails with "not authorized", and `list-databases` returns only `bank`. `SourceData` also fixes the database on every call, so the app never sends anything else.
+This is the lock on the data source. It does not depend on our code: whatever the backend or a client of the MCP server sends, MongoDB refuses anything outside `bank`. For example, reading `aipb.layouts` or `admin` fails with "not authorized", and `list-databases` returns only `bank`. `DirectSource` and `SourceData` also fix the database on every call, so the app never sends anything else.
 
 Passwords come from `.env` (see [.env.example](.env.example); the defaults there are for local development only). They are applied when the Mongo volume is first created. To change them, edit `.env` and run `docker compose down -v` (this deletes the data, which then regenerates). Mongo's port is bound to localhost.
 
@@ -144,7 +147,7 @@ A **semantic query** asks in those terms. An `aggregate` names metrics, dimensio
 
 - **Windows** ([Window.java](backend/src/main/java/com/aipb/semantic/Window.java)) are relative to the data's today: `ytd`, `trailing` / `lastClosed` n units, `current` unit, `next` n units, `range`, `all`. `on` picks another date (e.g. holdings maturity). `compare` (`priorYear` / `priorPeriod`) adds each metric's prior value as `<metric>Prior`, with periods lined up.
 - **Planning and compiling** ([QueryPlanner](backend/src/main/java/com/aipb/semantic/QueryPlanner.java), [PipelineCompiler](backend/src/main/java/com/aipb/semantic/PipelineCompiler.java)): one read-only pipeline per (model, window). Shared segments go into `$match`, others become conditional accumulators. Joins are added only when a path needs one.
-- **Executing** ([QueryExecutor](backend/src/main/java/com/aipb/semantic/QueryExecutor.java)), through `SourceData`:
+- **Executing** ([QueryExecutor](backend/src/main/java/com/aipb/semantic/QueryExecutor.java)), through `DirectSource` (the driver):
   - rows from different models and windows are merged on their dimension values;
   - every period of a time breakdown appears (a quarter without revenue shows 0);
   - a ratio with nothing to divide by is unknown, not 0.
@@ -189,7 +192,7 @@ The escape hatch is `data.custom`: a hand-written read-only pipeline over one co
 - **Contract.** The format is defined by [widget-spec.schema.json](backend/src/main/resources/widgets/widget-spec.schema.json). The design system is described by [primitives.json](backend/src/main/resources/widgets/primitives.json), which lists `metric`, `bar`, `line`, `table` and `list` with their roles, row limits, units, formats and usage guidance. Both are served by `GET /api/widgets/manifest`, which is the same contract the assistant will be given.
 - **Parameters** (custom data) are typed and referenced as `{"$param": "name"}`. Each one is replaced by a single JSON value, never spliced into text, so a value can't change the query. Dates become BSON dates; a plain-string date would silently match nothing. `asOfDate` is built in (`_meta.asOfDate`), so a spec never uses the wall clock.
 - **Primitives** live in [frontend/src/widgets/spec/](frontend/src/widgets/spec/). They use one validated chart palette (brand green first; checked for color-vision deficiency and 3:1 contrast), status badges that always carry a label, legends for two or more series, direct labels on line ends, exact axis ticks, and a table view for every chart.
-- **Runtime.** A placed widget (`{type: "spec", config: {definitionId}}`) fetches `GET /api/widgets/library/{id}/data?clientId=…`. The backend binds the parameters and runs the stored spec through `SourceData`. The browser never sends a query.
+- **Runtime.** A placed widget (`{type: "spec", config: {definitionId}}`) fetches `GET /api/widgets/library/{id}/data?clientId=…`. The backend binds the parameters and runs the stored spec through `DirectSource` (the driver, not MCP). The browser never sends a query.
 
 ### Page context
 
@@ -229,11 +232,11 @@ Nothing reaches the library without passing it. Its messages are written so a pe
 
 - **Workbench.** **+ Widget → Write a spec** gives you a JSON editor, *Validate* (errors, warnings and a live preview drawn by the real primitives) and *Save to library & place*. It is the manual version of the assistant's loop. **Library** places an existing definition; **Built-in** offers the legacy types.
 - **Starter specs.** [widgets/starter/](backend/src/main/resources/widgets/starter/) holds 12 semantic-query specs that rebuild Client 360 from `bank`. `StarterParityLiveTest` checks that they return the same figures, for every client, as the hand-written pipelines they replaced (kept in `src/test/resources/legacy-starters/`). The assistant's worked examples are frozen copies of those pipelines in `resources/assistant/examples/` until the assistant moves onto the semantic layer. Starters are loaded at startup through the same validator; a file with a higher `version` replaces the stored copy.
-- **Golden set.** `GoldenSpecsLiveTest` runs every starter spec through the real MCP server and compares it, across three clients and the whole book, with figures computed independently in plain Java over raw documents. The natural-language requests in [golden/cases.json](backend/src/test/resources/golden/cases.json) will become the assistant's evaluation set. Run it with the stack up:
+- **Golden set.** `GoldenSpecsLiveTest` runs every starter spec through the runtime path (the driver, as pages read) and compares it, across three clients and the whole book, with figures computed independently in plain Java over raw documents. The natural-language requests in [golden/cases.json](backend/src/test/resources/golden/cases.json) will become the assistant's evaluation set. Run it with the stack up:
 
 ```bash
 cd backend && mvn test                                            # unit tests
-cd backend && mvn test -Dgroups=live -Dsurefire.excludedGroups=   # golden set, against the running stack
+cd backend && BANK_READER_PASSWORD=... mvn test -Dgroups=live -Dsurefire.excludedGroups=   # golden set, against the running stack
 ```
 
 ## The widget assistant
@@ -287,7 +290,7 @@ Build and Review use read-only tools. All of them go through `SourceData`, so th
 
 ### Model, cost, limits
 
-- **Model:** `claude-opus-5-5` through the official Java SDK ([AnthropicGateway](backend/src/main/java/com/aipb/assistant/llm/AnthropicGateway.java)).
+- **Model:** per stage - `claude-haiku-5-5` for intake and present, `claude-sonnet-5-5` for build and review (`AIPB_MODEL_<STAGE>`) - through the official Java SDK ([AnthropicGateway](backend/src/main/java/com/aipb/assistant/llm/AnthropicGateway.java)).
 - **Request settings:** adaptive thinking; effort per stage (`AIPB_EFFORT_*`, default medium); prompt caching; server-side refusal fallbacks (`fallbacks: "default"`).
 - **Expected cost:** about **$0.35–0.45 per widget** at medium effort. The session's running cost is shown in the drawer.
 - **Caps** (`aipb.assistant.*`): 16 tool calls and 4 submissions per stage, 3 design attempts, 6 minutes per run. When a cap is hit, the assistant says what it couldn't finish.
@@ -313,11 +316,12 @@ cd backend && mvn test -Dgroups=eval -Dsurefire.excludedGroups= -Daipb.eval.limi
                                    SourceController    source-data connection status
                                    WidgetController    widget library, validation, widget data
                                    AssistantController widget assistant (stages → Claude via the Java SDK)
-        │                     │ WidgetDataService / WidgetSpecValidator → SourceData → McpClient (HTTP)
-        │               MongoDB MCP server (:3000 in the stack, :3001 on localhost; read-only)
+        │                     │ pages:     WidgetDataService → DirectSource (MongoDB driver)
+        │                     │ assistant: AssistantTools → SourceData → McpClient (HTTP)
+        │                     │              → MongoDB MCP server (:3000 in the stack, :3001 on localhost; read-only)
         │                     │
  MongoDB 7                         aipb: layouts, widgets (spec library), clients, opportunities, signals (demo book)
-                                   bank: synthetic source data + _catalog (read only via MCP, as bank_reader)
+                                   bank: synthetic source data + _catalog (read only, as bank_reader)
 ```
 
 `layouts/default` holds the pages, their parameters (e.g. Client 360's `clientId` picker, whose choices come from `bank.clients`) and their widgets. The React shell renders each widget's `type` from [frontend/src/widgets/registry.jsx](frontend/src/widgets/registry.jsx). `spec` renders a library definition. The legacy types `kpi-strip`, `client-360` and `client-table` are also declared in [WidgetManifest.java](backend/src/main/java/com/aipb/service/WidgetManifest.java) and serve only the reference page.
@@ -328,7 +332,7 @@ cd backend && mvn test -Dgroups=eval -Dsurefire.excludedGroups= -Daipb.eval.limi
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/status` | Health + layout version |
-| GET | `/api/source/status` | Source-data connection: MCP server, tools, collections, dictionary entries, asOfDate |
+| GET | `/api/source/status` | Source-data connections: direct (collections, dictionary entries, asOfDate) and `mcp` (server, tools) |
 | GET | `/api/kpis?lob=&region=&marketId=` | Book KPI tiles |
 | GET | `/api/clients?sort=revenue\|exposure\|health\|walletGap\|pipeline&q=` | Client book |
 | GET | `/api/clients/{id}` | Client 360 bundle |

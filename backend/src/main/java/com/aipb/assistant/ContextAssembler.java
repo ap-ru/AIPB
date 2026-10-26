@@ -139,7 +139,7 @@ public class ContextAssembler {
         return "<data_today>asOfDate: " + asOf + " (the latest closed revenue month is " + lastMonth + ")</data_today>\n";
     }
 
-    /** The widget library, so the assistant can reuse rather than duplicate. */
+    /** The widget library (approved widgets only: pending ones live in widget_submissions), so the assistant can reuse rather than duplicate. */
     public String library() {
         StringBuilder sb = new StringBuilder("<library>\n");
         List<WidgetDefinition> defs = new ArrayList<>(library.findAll());

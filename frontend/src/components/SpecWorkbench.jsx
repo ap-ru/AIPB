@@ -57,7 +57,7 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
   const [busy, setBusy] = useState(false);
   const [exists, setExists] = useState(false);
   const [sent, setSent] = useState(null);
-  const { role } = usePlatform();
+  const { can } = usePlatform();
 
   const parse = () => {
     try {
@@ -89,9 +89,9 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
     try {
       const saved = update ? await api.put('/api/widgets/library/' + encodeURIComponent(spec.id), body(spec))
         : await api.post('/api/widgets/library', body(spec));
-      // maker-checker: an approver's save is approved at once and placed; a builder's waits for approval
+      // maker-checker: a Reviewer's save is approved at once and placed; a Builder's waits for approval
       if (saved.status === 'approved') await onPlace(saved);
-      else setSent(`Sent “${saved.title}” for approval${update ? ` as a change to v${saved.baseVersion}` : ''}. It can be placed once an approver approves it; follow it in the assistant's Skills window.`);
+      else setSent(`Sent “${saved.title}” for approval${update ? ` as a change to v${saved.baseVersion}` : ''}. It can be placed once a Reviewer approves it; follow it in the assistant's Skills window.`);
     } catch (e) {
       if (e.status === 422 && e.body?.report) setReport(e.body.report);
       else if (e.status === 409) setExists(true);
@@ -111,7 +111,7 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
           <button className="btn" onClick={() => setText(template(page))} disabled={busy}>Reset</button>
           <div className="spacer" style={{ flex: 1 }} />
           <button className="btn" onClick={validate} disabled={busy}>{busy ? 'Working…' : 'Validate'}</button>
-          {role === 'approver'
+          {can.canReview
             ? exists
               ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Approve as new version & place</button>
               : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Approve to library & place</button>

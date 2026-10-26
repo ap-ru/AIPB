@@ -62,7 +62,7 @@ class SourceDataTest {
         nextResult = documents("[{\"_id\":\"HL-1\",\"openedDate\":{\"$date\":\"2021-06-01T00:00:00.000Z\"},"
                 + "\"drawnUsd\":{\"$numberLong\":\"178400000\"}}]", "[]");
 
-        SourceData.Result r = source.aggregate("holdings", List.of(Map.of("$match", Map.of("clientId", "CL-0001"))));
+        SourceReader.Result r = source.aggregate("holdings", List.of(Map.of("$match", Map.of("clientId", "CL-0001"))));
 
         JsonNode args = calls.get(0).path("params").path("arguments");
         assertThat(calls.get(0).path("params").path("name").asText()).isEqualTo("aggregate");
@@ -79,7 +79,7 @@ class SourceDataTest {
     void resultCutShortByAServerLimitIsMarkedTruncated() {
         nextResult = documents("[{\"a\":1}]", "[\"maxDocumentsPerQuery\"]");
         ((ObjectNode) nextResult.get("structuredContent")).put("queryResultsCount", 6159);
-        SourceData.Result r = source.find("clients", null, null, null, null);
+        SourceReader.Result r = source.find("clients", null, null, null, null);
         assertThat(r.truncated()).isTrue();
         assertThat(r.count()).isEqualTo(1);
         assertThat(r.total()).isEqualTo(6159);

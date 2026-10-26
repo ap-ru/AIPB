@@ -1,8 +1,8 @@
 package com.aipb.web;
 
 import com.aipb.assistant.AssistantOrchestrator;
+import com.aipb.identity.Actor;
 import com.aipb.source.SourceException;
-import com.aipb.widget.Role;
 import com.aipb.widget.WidgetLibrary;
 import com.aipb.widget.WidgetWorkflow;
 import org.springframework.http.HttpStatus;
@@ -26,6 +26,11 @@ public class ApiErrors {
         return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
     }
 
+    @ExceptionHandler(Actor.Forbidden.class)
+    public ResponseEntity<Map<String, String>> forbidden(Actor.Forbidden e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", String.valueOf(e.getMessage())));
+    }
+
     @ExceptionHandler(SourceException.class)
     public ResponseEntity<Map<String, String>> sourceUnavailable(SourceException e) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", String.valueOf(e.getMessage())));
@@ -40,11 +45,6 @@ public class ApiErrors {
     @ExceptionHandler(WidgetLibrary.DuplicateException.class)
     public ResponseEntity<Map<String, String>> duplicate(WidgetLibrary.DuplicateException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", String.valueOf(e.getMessage())));
-    }
-
-    @ExceptionHandler(Role.Forbidden.class)
-    public ResponseEntity<Map<String, String>> forbidden(Role.Forbidden e) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", String.valueOf(e.getMessage())));
     }
 
     @ExceptionHandler({AssistantOrchestrator.BusyException.class, AssistantOrchestrator.ConfirmationRequired.class, WidgetWorkflow.Conflict.class})

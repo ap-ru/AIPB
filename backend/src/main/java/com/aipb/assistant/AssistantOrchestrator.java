@@ -2,6 +2,7 @@ package com.aipb.assistant;
 
 import com.aipb.assistant.llm.LlmException;
 import com.aipb.assistant.stages.*;
+import com.aipb.identity.Actor;
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
 import com.aipb.source.SourceException;
@@ -25,10 +26,10 @@ import java.util.function.Supplier;
  * Runs the widget assistant: a code-orchestrated pipeline of narrow stages, each a separate Claude conversation with
  * one objective and a deterministic gate.
  * <pre>
- * message -> INTAKE -> proceed -> BUILD -> PRESENT -> proposal -> submitted for approval (an approver's is approved)
+ * message -> INTAKE -> proceed -> BUILD -> PRESENT -> proposal -> submitted for approval (a Reviewer's is approved)
  *                   -> clarify / answer / decline / reuse (reply, no build; a reused widget is placed as it is)
  *                   -> verify (opt-in) -> REVIEW -> [findings -> BUILD -> PRESENT]
- * approver: sends back -> the comment joins the conversation -> the builder's next message revises -> resubmitted
+ * Reviewer: feedback & revise -> the comment joins the conversation -> the Builder's next message revises -> resubmitted
  * </pre>
  * A revision that only changes the display re-runs PRESENT alone. Stages see each other's artifacts, never their
  * transcripts. The session is saved after every stage, and every stage run is recorded (tokens, cost, tool calls,
@@ -70,15 +71,23 @@ public class AssistantOrchestrator {
         public BusyException() { super("the assistant is still working on the previous message"); }
     }
 
-    public AssistantSession create(String layoutId, String pageId, Map<String, String> params) {
+    public AssistantSession create(String layoutId, String pageId, Map<String, String> params, String owner) {
         AssistantSession s = new AssistantSession();
         s.setId(UUID.randomUUID().toString());
+        s.setOwner(owner);
         s.setLayoutId(layoutId == null ? "default" : layoutId);
         s.setPageId(pageId);
         if (params != null) s.setParams(new LinkedHashMap<>(params));
         s.setCreatedAt(Instant.now());
         s.setUpdatedAt(Instant.now());
         return sessions.save(s);
+    }
+
+    /** The session, if it belongs to {@code actorId}; someone else's conversation is reported as not found. */
+    public AssistantSession get(String id, String actorId) {
+        AssistantSession s = get(id);
+        if (s.getOwner() != null && !s.getOwner().equals(actorId)) throw new NoSuchElementException("assistant session " + id);
+        return s;
     }
 
     public AssistantSession get(String id) {
@@ -114,7 +123,7 @@ public class AssistantOrchestrator {
      * is a revision of it (and a display-only change keeps its data as it is). Runs on a page that supplies what the
      * widget needs - the given one when it can.
      */
-    public AssistantSession createModify(String layoutId, String pageId, Map<String, String> params, String widgetId) {
+    public AssistantSession createModify(String layoutId, String pageId, Map<String, String> params, String widgetId, String owner) {
         WidgetDefinition d = library.get(widgetId);
         workflow.openFor(widgetId).ifPresent(o -> {
             throw new WidgetWorkflow.Conflict("\"" + d.getTitle() + "\" already has a change waiting for approval; open that one from Skills instead");
@@ -122,7 +131,7 @@ public class AssistantOrchestrator {
         JsonNode spec = library.spec(d);
         Map<String, String> sample = new LinkedHashMap<>(library.sampleParams(spec));
         if (params != null) params.forEach((k, v) -> { if (v != null && !v.isBlank()) sample.put(k, v); });
-        AssistantSession s = create(layoutId, pageFor(layoutId, pageId, d), sample);
+        AssistantSession s = create(layoutId, pageFor(layoutId, pageId, d), sample, owner);
         s.setModifies(d.getId());
         s.setModifiesVersion(d.getVersion());
         s.setModifiesTitle(d.getTitle());
@@ -152,9 +161,9 @@ public class AssistantOrchestrator {
     /**
      * Sends the proposed widget for approval - a resubmission when the conversation's widget was sent back, a change
      * when it modifies a library widget - or, for a widget reused from the library, places it on the page. An
-     * approver's widget is approved as it is submitted. Nothing new reaches a page here.
+     * Reviewer's widget is approved as it is submitted. Nothing new reaches a page here.
      */
-    public Map<String, Object> submit(String sessionId, boolean confirmUnverified, Role role) {
+    public Map<String, Object> submit(String sessionId, boolean confirmUnverified, Actor actor) {
         return withLock(sessionId, () -> {
             AssistantSession s = get(sessionId);
             if (s.getProposal() == null) throw new IllegalArgumentException("there is nothing to submit yet");
@@ -186,7 +195,7 @@ public class AssistantOrchestrator {
             submitting.set(s.getId());
             try {
                 if (previous != null && previous.open()) {
-                    sub = workflow.resubmit(previous.getId(), spec, role);
+                    sub = workflow.resubmit(previous.getId(), spec, actor);
                 } else if (previous != null && WidgetSubmission.REJECTED.equals(previous.getStatus())) {
                     throw new WidgetWorkflow.Conflict("this widget was rejected; start a new chat to build another");
                 } else {
@@ -194,14 +203,14 @@ public class AssistantOrchestrator {
                     String modifies = previous != null ? previous.getWidgetId() : s.getModifies();
                     if (modifies == null) spec.put("id", uniqueId(spec.path("id").asText()));
                     sub = workflow.submit(new WidgetWorkflow.Submit(spec, "assistant", s.getId(), s.getLayoutId(), s.getPageId(),
-                            s.getParams(), modifies), role);
+                            s.getParams(), modifies), actor);
                 }
             } finally {
                 submitting.remove();
             }
             s.setSubmissionId(sub.getId());
             s.setApproval(sub.getStatus());
-            s.setApproverFeedback(null);
+            s.setReviewerFeedback(null);
             String title = "\"" + sub.getTitle() + "\"";
             if (WidgetSubmission.APPROVED.equals(sub.getStatus())) {
                 s.setApprovedVersion(sub.getApprovedVersion());
@@ -219,7 +228,7 @@ public class AssistantOrchestrator {
         });
     }
 
-    /** An approver's decision, shown in the conversation the widget came from (decisions taken in it are recorded by submit). */
+    /** A Reviewer's decision, shown in the conversation the widget came from (decisions taken in it are recorded by submit). */
     @EventListener
     public void onDecision(WidgetWorkflow.Decision d) {
         WidgetSubmission sub = d.submission();
@@ -233,13 +242,13 @@ public class AssistantOrchestrator {
             case "approved" -> {
                 s.setApprovedVersion(sub.getApprovedVersion());
                 s.setPlacedDefinitionId(sub.getWidgetId());
-                s.getTurns().add(new AssistantSession.Turn("approver", "Approved " + title + " as v" + sub.getApprovedVersion() + "." + note, "approved", Instant.now()));
+                s.getTurns().add(new AssistantSession.Turn("reviewer", "Approved " + title + " as v" + sub.getApprovedVersion() + "." + note, "approved", Instant.now()));
             }
             case "sent_back" -> {
-                s.setApproverFeedback(d.comment());
-                s.getTurns().add(new AssistantSession.Turn("approver", "Sent back with changes needed:" + note, "sent_back", Instant.now()));
+                s.setReviewerFeedback(d.comment());
+                s.getTurns().add(new AssistantSession.Turn("reviewer", "Feedback & revise:" + note, "sent_back", Instant.now()));
             }
-            default -> s.getTurns().add(new AssistantSession.Turn("approver", "Rejected " + title + "." + note, "rejected", Instant.now()));
+            default -> s.getTurns().add(new AssistantSession.Turn("reviewer", "Rejected " + title + "." + note, "rejected", Instant.now()));
         }
         s.setApproval(sub.getStatus());
         s.setUpdatedAt(Instant.now());
@@ -274,8 +283,8 @@ public class AssistantOrchestrator {
         events.emit("message", Map.of("text", out.path("message").asText(), "kind", "ack"));
         AssistantTools.Context ctx = context(s);
 
-        String request = s.getApproverFeedback() == null ? text
-                : text + "\n\nThe approver sent the widget back with this feedback: " + s.getApproverFeedback();
+        String request = s.getReviewerFeedback() == null ? text
+                : text + "\n\nThe Reviewer gave this feedback to revise the widget: " + s.getReviewerFeedback();
         JsonNode data;
         if (presentationOnly) {
             data = read(s.getData());

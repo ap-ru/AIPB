@@ -102,7 +102,7 @@ public class WidgetLibrary implements ApplicationRunner {
      * {@code source} says where the version came from (see {@link WidgetVersion}).
      */
     public WidgetDefinition publish(Checked c, int version, String origin, String source, String submissionId,
-                                    Integer restoredFrom, String role) {
+                                    Integer restoredFrom, String role, String owner) {
         c.spec().put("version", version);
         WidgetSpec s = c.parsed();
         WidgetDefinition current = repo.findById(s.id()).orElse(null);
@@ -132,6 +132,7 @@ public class WidgetLibrary implements ApplicationRunner {
         d.setCollection(data.sourceLabel(s));
         d.setParams(data.requiredParams(s));
         d.setAuthor(c.spec().path("provenance").path("author").asText(null));
+        d.setOwner(owner != null ? owner : current != null ? current.getOwner() : null);
         d.setSpec(c.spec().toString());
         d.setCreatedAt(current == null ? Instant.now() : current.getCreatedAt());
         d.setUpdatedAt(Instant.now());
@@ -216,7 +217,7 @@ public class WidgetLibrary implements ApplicationRunner {
                     continue;
                 }
                 Checked c = check(spec, fileVersion, "starter", "default", null, sampleParams(spec));
-                publish(c, fileVersion, WidgetDefinition.STOCK, WidgetVersion.STOCK, null, null, null);
+                publish(c, fileVersion, WidgetDefinition.STOCK, WidgetVersion.STOCK, null, null, null, "system");
                 loaded++;
             } catch (SpecInvalidException e) {
                 skipped++;

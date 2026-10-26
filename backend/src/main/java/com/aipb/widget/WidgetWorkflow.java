@@ -1,5 +1,6 @@
 package com.aipb.widget;
 
+import com.aipb.identity.Actor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -11,14 +12,15 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * Maker-checker for the widget library. A builder's widget, or change to a widget, is a {@link WidgetSubmission} that
- * waits for an approver; an approver's own is approved as it is submitted.
+ * Maker-checker for the widget library. A Builder's widget, or change to a widget, is a {@link WidgetSubmission} that
+ * waits for a Reviewer; a Reviewer's own is approved as it is submitted. Nothing in a submission can be used before it
+ * is approved.
  * <pre>
- * submit -> pending -> approve   -> approved (the widget's next version, live on every page that places it)
- *                   -> send back -> changes_requested -> resubmit -> pending
- *                   -> reject    -> rejected (final)
+ * submit -> pending -> approve            -> approved (the widget's next version, live on every page that places it)
+ *                   -> feedback & revise  -> changes_requested -> resubmit -> pending
+ *                   -> reject             -> rejected (final)
  * </pre>
- * An approver can also restore an older version, which is published again as the next version. A widget has at most
+ * A Reviewer can also restore an older version, which is published again as the next version. A widget has at most
  * one open submission at a time. Each decision is published as a {@link Decision} event, so the assistant conversation
  * a submission came from can show it.
  */
@@ -41,11 +43,12 @@ public class WidgetWorkflow {
     public record Submit(JsonNode spec, String origin, String sessionId, String layoutId, String pageId,
                          Map<String, String> params, String modifies) {}
 
-    /** A decision on a submission (submitted, resubmitted, approved, sent_back, rejected), for listeners. */
-    public record Decision(WidgetSubmission submission, String type, Role role, String comment) {}
+    /** A decision on a submission (submitted, resubmitted, approved, sent_back = feedback & revise, rejected), for listeners. */
+    public record Decision(WidgetSubmission submission, String type, Actor actor, String comment) {}
 
     // ------------------------------------------------------------------ the flow
-    public synchronized WidgetSubmission submit(Submit req, Role role) {
+    public synchronized WidgetSubmission submit(Submit req, Actor actor) {
+        actor.requireAuthor();
         if (req.spec() == null || !req.spec().isObject()) throw new IllegalArgumentException("a widget spec is required");
         ObjectNode spec = req.spec().deepCopy();
         Integer base = null;
@@ -72,18 +75,22 @@ public class WidgetWorkflow {
         s.setLayoutId(req.layoutId() == null ? "default" : req.layoutId());
         s.setPageId(req.pageId());
         if (req.params() != null) s.setParams(new LinkedHashMap<>(req.params()));
-        s.setSubmittedByRole(role.key());
+        s.setSubmittedBy(actor.id());
+        s.setSubmittedByRole(actor.role().id());
         s.setCreatedAt(Instant.now());
         setSpec(s, c);
-        record(s, "submitted", role, null);
+        record(s, "submitted", actor, null);
         submissions.save(s);
-        events.publishEvent(new Decision(s, "submitted", role, null));
-        return role == Role.APPROVER ? decideApprove(s, role, null) : s;
+        events.publishEvent(new Decision(s, "submitted", actor, null));
+        return actor.role().canReview() ? decideApprove(s, actor, null) : s;
     }
 
-    /** A revised spec for an open submission (after a send-back, or while it waits); it waits for approval again. */
-    public synchronized WidgetSubmission resubmit(String submissionId, JsonNode specIn, Role role) {
+    /** A revised spec for an open submission (after feedback, or while it waits); it waits for approval again. */
+    public synchronized WidgetSubmission resubmit(String submissionId, JsonNode specIn, Actor actor) {
+        actor.requireAuthor();
         WidgetSubmission s = get(submissionId);
+        if (!actor.role().canReview() && s.getSubmittedBy() != null && !s.getSubmittedBy().equals(actor.id()))
+            throw new Actor.Forbidden("only the Builder who submitted it, or a Reviewer, can revise this widget");
         if (!s.open()) throw new Conflict("this submission is " + label(s.getStatus()) + " and cannot be changed");
         ObjectNode spec = specIn.deepCopy();
         spec.put("id", s.getWidgetId());
@@ -91,64 +98,65 @@ public class WidgetWorkflow {
                 s.getLayoutId(), s.getPageId(), s.getParams());
         setSpec(s, c);
         s.setStatus(WidgetSubmission.PENDING);
-        record(s, "resubmitted", role, null);
+        record(s, "resubmitted", actor, null);
         submissions.save(s);
-        events.publishEvent(new Decision(s, "resubmitted", role, null));
-        return role == Role.APPROVER ? decideApprove(s, role, null) : s;
+        events.publishEvent(new Decision(s, "resubmitted", actor, null));
+        return actor.role().canReview() ? decideApprove(s, actor, null) : s;
     }
 
-    public synchronized WidgetSubmission approve(String submissionId, Role role, String comment) {
-        role.requireApprover("approve a widget");
+    public synchronized WidgetSubmission approve(String submissionId, Actor actor, String comment) {
+        actor.requireReviewer("approve a widget");
         WidgetSubmission s = get(submissionId);
         if (!WidgetSubmission.PENDING.equals(s.getStatus())) throw new Conflict("only a pending submission can be approved; this one is " + label(s.getStatus()));
-        return decideApprove(s, role, comment);
+        return decideApprove(s, actor, comment);
     }
 
-    public synchronized WidgetSubmission sendBack(String submissionId, Role role, String comment) {
-        role.requireApprover("send a widget back");
-        if (comment == null || comment.isBlank()) throw new IllegalArgumentException("say what needs to change");
+    /** Feedback & revise: the Builder gets the comment and revises the widget. */
+    public synchronized WidgetSubmission sendBack(String submissionId, Actor actor, String comment) {
+        actor.requireReviewer("give feedback on a widget");
+        if (comment == null || comment.isBlank()) throw new IllegalArgumentException("give the feedback: what should be revised");
         WidgetSubmission s = get(submissionId);
-        if (!WidgetSubmission.PENDING.equals(s.getStatus())) throw new Conflict("only a pending submission can be sent back; this one is " + label(s.getStatus()));
+        if (!WidgetSubmission.PENDING.equals(s.getStatus())) throw new Conflict("only a pending submission can get feedback; this one is " + label(s.getStatus()));
         s.setStatus(WidgetSubmission.CHANGES_REQUESTED);
-        return decide(s, "sent_back", role, comment.trim());
+        return decide(s, "sent_back", actor, comment.trim());
     }
 
-    public synchronized WidgetSubmission reject(String submissionId, Role role, String reason) {
-        role.requireApprover("reject a widget");
+    public synchronized WidgetSubmission reject(String submissionId, Actor actor, String reason) {
+        actor.requireReviewer("reject a widget");
         if (reason == null || reason.isBlank()) throw new IllegalArgumentException("give a reason for the rejection");
         WidgetSubmission s = get(submissionId);
         if (!s.open()) throw new Conflict("this submission is " + label(s.getStatus()) + " already");
         s.setStatus(WidgetSubmission.REJECTED);
-        return decide(s, "rejected", role, reason.trim());
+        return decide(s, "rejected", actor, reason.trim());
     }
 
     /** Makes an older version current again, as the widget's next version. Checked against today's data first. */
-    public synchronized WidgetDefinition restore(String widgetId, int version, Role role) {
-        role.requireApprover("restore a version");
+    public synchronized WidgetDefinition restore(String widgetId, int version, Actor actor) {
+        actor.requireReviewer("restore a version");
         WidgetDefinition current = library.get(widgetId);
         if (version == current.getVersion()) throw new IllegalArgumentException("v" + version + " is already the current version");
         WidgetVersion old = library.version(widgetId, version);
         JsonNode spec = library.spec(old);
         String author = spec.path("provenance").path("author").asText("restore");
         WidgetLibrary.Checked c = library.check(spec, current.getVersion() + 1, author, "default", null, library.sampleParams(spec));
-        return library.publish(c, current.getVersion() + 1, current.getOrigin(), WidgetVersion.RESTORE, null, version, role.key());
+        return library.publish(c, current.getVersion() + 1, current.getOrigin(), WidgetVersion.RESTORE, null, version, actor.role().id(), current.getOwner());
     }
 
-    private WidgetSubmission decideApprove(WidgetSubmission s, Role role, String comment) {
+    private WidgetSubmission decideApprove(WidgetSubmission s, Actor actor, String comment) {
         // checked again: the data may have changed since it was submitted
         int version = library.find(s.getWidgetId()).map(d -> d.getVersion() + 1).orElse(1);
         WidgetLibrary.Checked c = library.check(read(s.getSpec()), version, s.getOrigin(), s.getLayoutId(), s.getPageId(), s.getParams());
-        library.publish(c, version, WidgetDefinition.BUILT, WidgetVersion.APPROVED, s.getId(), null, role.key());
+        library.publish(c, version, WidgetDefinition.BUILT, WidgetVersion.APPROVED, s.getId(), null, actor.role().id(), s.getSubmittedBy());
         s.setApprovedVersion(version);
         s.setSpec(c.spec().toString());
         s.setStatus(WidgetSubmission.APPROVED);
-        return decide(s, "approved", role, comment == null || comment.isBlank() ? null : comment.trim());
+        return decide(s, "approved", actor, comment == null || comment.isBlank() ? null : comment.trim());
     }
 
-    private WidgetSubmission decide(WidgetSubmission s, String type, Role role, String comment) {
-        record(s, type, role, comment);
+    private WidgetSubmission decide(WidgetSubmission s, String type, Actor actor, String comment) {
+        record(s, type, actor, comment);
         submissions.save(s);
-        events.publishEvent(new Decision(s, type, role, comment));
+        events.publishEvent(new Decision(s, type, actor, comment));
         return s;
     }
 
@@ -169,21 +177,23 @@ public class WidgetWorkflow {
     public JsonNode spec(WidgetSubmission s) { return read(s.getSpec()); }
 
     /**
-     * The Skills window for a role, as sections in display order. A builder: the widgets in progress (pending, sent
-     * back, rejected), then approved, then stock. An approver: the widgets waiting for approval, then approved, then
-     * stock. Everyone sees the current version number; the history is for approvers ({@link WidgetController}).
+     * The Skills window for an actor, as sections in display order. A Builder: their widgets in progress (pending,
+     * feedback to revise, rejected), then approved, then stock. A Reviewer: the widgets waiting for approval, then
+     * approved, then stock. A Banker: approved and stock. Everyone sees the current version number; the history is for
+     * Reviewers ({@link WidgetController}).
      */
-    public List<Map<String, Object>> skills(Role role) {
+    public List<Map<String, Object>> skills(Actor actor) {
         Map<String, WidgetSubmission> openByWidget = new HashMap<>();
         submissions.findByStatusIn(WidgetSubmission.OPEN).forEach(s -> openByWidget.put(s.getWidgetId(), s));
         List<Map<String, Object>> sections = new ArrayList<>();
-        if (role == Role.APPROVER) {
+        if (actor.role().canReview()) {
             List<WidgetSubmission> waiting = submissions.findByStatusIn(List.of(WidgetSubmission.PENDING)).stream()
                     .sorted(Comparator.comparing(WidgetSubmission::getUpdatedAt)).toList();
             sections.add(section("review", "Needs approval", waiting.stream().map(this::item).toList()));
-        } else {
+        } else if (actor.role().canAuthor()) {
             List<WidgetSubmission> mine = submissions.findByStatusIn(List.of(WidgetSubmission.PENDING, WidgetSubmission.CHANGES_REQUESTED,
-                    WidgetSubmission.REJECTED)).stream().sorted(Comparator.comparing(WidgetSubmission::getUpdatedAt).reversed()).toList();
+                    WidgetSubmission.REJECTED)).stream().filter(s -> ownedBy(s, actor))
+                    .sorted(Comparator.comparing(WidgetSubmission::getUpdatedAt).reversed()).toList();
             sections.add(section("mine", "My widgets", mine.stream().map(this::item).toList()));
         }
         List<WidgetDefinition> all = library.list();
@@ -194,9 +204,16 @@ public class WidgetWorkflow {
         return sections;
     }
 
-    /** What needs the role's attention: pending approvals for an approver, sent-back widgets for a builder. */
-    public long attention(Role role) {
-        return submissions.findByStatusIn(List.of(role == Role.APPROVER ? WidgetSubmission.PENDING : WidgetSubmission.CHANGES_REQUESTED)).size();
+    /** What needs the actor's attention: pending approvals for a Reviewer, their widgets with feedback for a Builder. */
+    public long attention(Actor actor) {
+        if (actor.role().canReview()) return submissions.findByStatusIn(List.of(WidgetSubmission.PENDING)).size();
+        if (!actor.role().canAuthor()) return 0;
+        return submissions.findByStatusIn(List.of(WidgetSubmission.CHANGES_REQUESTED)).stream().filter(s -> ownedBy(s, actor)).count();
+    }
+
+    /** Submitted by this actor (submissions from before actors existed belong to every builder). */
+    private static boolean ownedBy(WidgetSubmission s, Actor actor) {
+        return s.getSubmittedBy() == null || s.getSubmittedBy().equals(actor.id());
     }
 
     /** Validates a spec without saving it, for a live preview: errors, warnings and the first rows. */
@@ -258,8 +275,8 @@ public class WidgetWorkflow {
         s.setPrimitive(c.parsed().view().primitive());
     }
 
-    private static void record(WidgetSubmission s, String type, Role role, String comment) {
-        s.getHistory().add(new WidgetSubmission.Event(type, role.key(), comment, Instant.now()));
+    private static void record(WidgetSubmission s, String type, Actor actor, String comment) {
+        s.getHistory().add(new WidgetSubmission.Event(type, actor.role().id(), comment, Instant.now()));
         s.setUpdatedAt(Instant.now());
     }
 

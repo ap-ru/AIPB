@@ -6,7 +6,7 @@ import com.aipb.semantic.Model;
 import com.aipb.semantic.SemanticModel;
 import com.aipb.semantic.SemanticQuery;
 import com.aipb.semantic.Window;
-import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -37,9 +37,9 @@ public class ContextResolver {
     private static final JsonNodeFactory F = JsonNodeFactory.instance;
 
     private final SemanticModel semantic;
-    private final SourceData source;
+    private final SourceReader source;
 
-    public ContextResolver(SemanticModel semantic, SourceData source) {
+    public ContextResolver(SemanticModel semantic, SourceReader source) {
         this.semantic = semantic;
         this.source = source;
     }

@@ -33,6 +33,7 @@ public class WidgetDefinition {
     private List<String> params;
     private String author;       // "starter" | "workbench" | later "assistant"
     private String spec;         // the WidgetSpec JSON, as saved
+    private String owner;        // actor who built it (e.g. demo-builder); "system" for stock widgets
     private Instant createdAt;
     private Instant updatedAt;
 }

@@ -8,6 +8,9 @@ import com.aipb.assistant.stages.*;
 import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
 import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
+import com.aipb.identity.Actor;
+import com.aipb.identity.Role;
 import com.aipb.widget.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +22,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -48,6 +52,8 @@ class AssistantOrchestratorTest {
     private WidgetDataService widgetData;
     private AssistantProperties props;
     private AssistantOrchestrator orchestrator;
+    private static final Actor BUILDER = Actor.of(Role.BUILDER);
+    private static final Actor REVIEWER = Actor.of(Role.REVIEWER);
 
     @BeforeEach
     void setUp() throws Exception {
@@ -105,7 +111,7 @@ class AssistantOrchestratorTest {
                       "columns":null,"title":null,"subtitle":null,"badge":null,"meta":null},"span":7,"columnOverrides":[]}""";
 
     private String newSession() {
-        return orchestrator.create("default", "client", Map.of("clientId", "CL-0002")).getId();
+        return orchestrator.create("default", "client", Map.of("clientId", "CL-0002"), "demo-builder").getId();
     }
 
     // ------------------------------------------------------------------ tests
@@ -194,7 +200,7 @@ class AssistantOrchestratorTest {
     void aClientScopedBriefOnABookPageIsSentBack() {
         claude.on("intake", FakeGateway.json(BRIEF),
                 FakeGateway.json("{\"outcome\":\"decline\",\"message\":\"Client widgets belong on Client 360.\",\"brief\":null,\"reuseDefinitionId\":null,\"changed\":[]}"));
-        String id = orchestrator.create("default", "command-center", Map.of()).getId();
+        String id = orchestrator.create("default", "command-center", Map.of(), "demo-builder").getId();
         orchestrator.message(id, "show this client's revenue", null, recorder);
         assertThat(((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(2)).blocks().get(0)).text()).contains("scope must be book");
         assertThat(store.get(id).getTurns().get(1).getKind()).isEqualTo("decline");
@@ -268,14 +274,14 @@ class AssistantOrchestratorTest {
         String id = newSession();
         orchestrator.message(id, "revenue by quarter", null, recorder);
         when(workflow.idTaken("quarterly-revenue")).thenReturn(true); // taken: the new widget gets a suffix
-        when(workflow.submit(any(), eq(Role.BUILDER))).thenReturn(submission("sub-1", "quarterly-revenue-2", WidgetSubmission.PENDING, null));
+        when(workflow.submit(any(), eq(BUILDER))).thenReturn(submission("sub-1", "quarterly-revenue-2", WidgetSubmission.PENDING, null));
 
-        orchestrator.submit(id, false, Role.BUILDER);
+        orchestrator.submit(id, false, BUILDER);
 
         verify(workflow).submit(argThat(r -> r.spec().path("id").asText().equals("quarterly-revenue-2")
                 && r.modifies() == null && r.sessionId().equals(id) && r.pageId().equals("client")
                 && r.spec().path("provenance").path("reviewed").asText().equals("none")
-                && r.spec().path("provenance").path("question").asText().contains("revenue")), eq(Role.BUILDER));
+                && r.spec().path("provenance").path("question").asText().contains("revenue")), eq(BUILDER));
         verifyNoInteractions(placement);
         AssistantSession s = store.get(id);
         assertThat(s.getSubmissionId()).isEqualTo("sub-1");
@@ -288,9 +294,9 @@ class AssistantOrchestratorTest {
         claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
         String id = newSession();
         orchestrator.message(id, "revenue by quarter", null, recorder);
-        when(workflow.submit(any(), eq(Role.APPROVER))).thenReturn(submission("sub-1", "quarterly-revenue", WidgetSubmission.APPROVED, 1));
+        when(workflow.submit(any(), eq(REVIEWER))).thenReturn(submission("sub-1", "quarterly-revenue", WidgetSubmission.APPROVED, 1));
 
-        orchestrator.submit(id, false, Role.APPROVER);
+        orchestrator.submit(id, false, REVIEWER);
 
         AssistantSession s = store.get(id);
         assertThat(s.getApproval()).isEqualTo(WidgetSubmission.APPROVED);
@@ -305,17 +311,17 @@ class AssistantOrchestratorTest {
         String id = newSession();
         orchestrator.message(id, "revenue by quarter", null, recorder);
         WidgetSubmission sub = submission("sub-1", "quarterly-revenue", WidgetSubmission.PENDING, null);
-        when(workflow.submit(any(), eq(Role.BUILDER))).thenReturn(sub);
-        orchestrator.submit(id, false, Role.BUILDER);
+        when(workflow.submit(any(), eq(BUILDER))).thenReturn(sub);
+        orchestrator.submit(id, false, BUILDER);
 
         // the approver sends it back from Skills
         WidgetSubmission sent = submission("sub-1", "quarterly-revenue", WidgetSubmission.CHANGES_REQUESTED, null);
         sent.setSessionId(id);
-        orchestrator.onDecision(new WidgetWorkflow.Decision(sent, "sent_back", Role.APPROVER, "Show 12 quarters, not 8"));
+        orchestrator.onDecision(new WidgetWorkflow.Decision(sent, "sent_back", REVIEWER, "Show 12 quarters, not 8"));
         AssistantSession s = store.get(id);
         assertThat(s.getApproval()).isEqualTo(WidgetSubmission.CHANGES_REQUESTED);
-        assertThat(s.getApproverFeedback()).isEqualTo("Show 12 quarters, not 8");
-        assertThat(s.getTurns().get(s.getTurns().size() - 1).getRole()).isEqualTo("approver");
+        assertThat(s.getReviewerFeedback()).isEqualTo("Show 12 quarters, not 8");
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getRole()).isEqualTo("reviewer");
 
         // the builder revises: intake and build both see the feedback
         claude.requests.clear();
@@ -324,14 +330,14 @@ class AssistantOrchestratorTest {
         orchestrator.message(id, "ok, fix that", null, recorder);
         String intakeContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(0).messages().get(0)).blocks().get(0)).text();
         String buildContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(0)).blocks().get(0)).text();
-        assertThat(intakeContext).contains("<approver_feedback>").contains("Show 12 quarters").contains("Approver: Sent back");
+        assertThat(intakeContext).contains("<reviewer_feedback>").contains("Show 12 quarters").contains("Reviewer: Feedback & revise");
         assertThat(buildContext).contains("Show 12 quarters");
 
         when(workflow.get("sub-1")).thenReturn(sent);
-        when(workflow.resubmit(eq("sub-1"), any(), eq(Role.BUILDER))).thenReturn(sub);
-        orchestrator.submit(id, false, Role.BUILDER);
-        verify(workflow).resubmit(eq("sub-1"), any(), eq(Role.BUILDER));
-        assertThat(store.get(id).getApproverFeedback()).isNull();
+        when(workflow.resubmit(eq("sub-1"), any(), eq(BUILDER))).thenReturn(sub);
+        orchestrator.submit(id, false, BUILDER);
+        verify(workflow).resubmit(eq("sub-1"), any(), eq(BUILDER));
+        assertThat(store.get(id).getReviewerFeedback()).isNull();
     }
 
     @Test
@@ -353,7 +359,7 @@ class AssistantOrchestratorTest {
         when(workflow.preview(any(), any(), any(), any())).thenReturn(new ValidationReport(true, List.of(), List.of(), Map.of("clientId", "CL-0001"),
                 new ValidationReport.Preview(cols, rows, 1, 1, false, "2026-10-16T00:00:00.000Z", List.of())));
 
-        AssistantSession s = orchestrator.createModify("default", "client", Map.of("clientId", "CL-0002"), "client-revenue-by-lob");
+        AssistantSession s = orchestrator.createModify("default", "client", Map.of("clientId", "CL-0002"), "client-revenue-by-lob", "demo-builder");
         assertThat(s.getModifies()).isEqualTo("client-revenue-by-lob");
         assertThat(s.getModifiesVersion()).isEqualTo(4);
         assertThat(read(s.getData()).path("query").path("metrics").get(0).asText()).isEqualTo("revenueUsd");
@@ -377,9 +383,9 @@ class AssistantOrchestratorTest {
         assertThat(data.has("pipeline")).isFalse();
         assertThat(data.path("columns").toString()).contains("\"label\":\"LOB\"").doesNotContain("currency");
 
-        when(workflow.submit(any(), eq(Role.BUILDER))).thenReturn(submission("sub-2", "client-revenue-by-lob", WidgetSubmission.PENDING, null));
-        orchestrator.submit(s.getId(), false, Role.BUILDER);
-        verify(workflow).submit(argThat(r -> "client-revenue-by-lob".equals(r.modifies())), eq(Role.BUILDER));
+        when(workflow.submit(any(), eq(BUILDER))).thenReturn(submission("sub-2", "client-revenue-by-lob", WidgetSubmission.PENDING, null));
+        orchestrator.submit(s.getId(), false, BUILDER);
+        verify(workflow).submit(argThat(r -> "client-revenue-by-lob".equals(r.modifies())), eq(BUILDER));
     }
 
     @Test
@@ -401,7 +407,7 @@ class AssistantOrchestratorTest {
         when(library.spec(d)).thenReturn(readUnchecked("{\"id\":\"quarterly-revenue\",\"provenance\":{\"sessionId\":\"" + first + "\"}}"));
         when(workflow.openFor(any())).thenReturn(Optional.empty());
 
-        AssistantSession s = orchestrator.createModify("default", "client", Map.of("clientId", "CL-0002"), "quarterly-revenue");
+        AssistantSession s = orchestrator.createModify("default", "client", Map.of("clientId", "CL-0002"), "quarterly-revenue", "demo-builder");
 
         assertThat(s.getEarlier()).extracting(AssistantSession.Earlier::getSessionId).containsExactly("older", first);
         AssistantSession.Earlier e = s.getEarlier().get(1);
@@ -425,10 +431,17 @@ class AssistantOrchestratorTest {
         String id = newSession();
         orchestrator.message(id, "revenue this year", null, recorder);
 
-        orchestrator.submit(id, false, Role.BUILDER);
+        orchestrator.submit(id, false, BUILDER);
 
         verify(placement).placeDefinition("default", "client", "client-revenue-ytd", "assistant");
         verifyNoInteractions(workflow);
+    }
+
+    @Test
+    void aSessionBelongsToItsOwner() {
+        String id = newSession();
+        assertThat(orchestrator.get(id, "demo-builder").getId()).isEqualTo(id);
+        assertThatThrownBy(() -> orchestrator.get(id, "demo-reviewer")).isInstanceOf(NoSuchElementException.class);
     }
 
     private WidgetSubmission submission(String id, String widgetId, String status, Integer version) {
@@ -452,9 +465,9 @@ class AssistantOrchestratorTest {
         return new ValidationReport(false, List.of(new ValidationReport.Issue(code, "data.pipeline", message)), List.of(), Map.of(), null);
     }
 
-    private SourceData.Result result(String rows) {
+    private SourceReader.Result result(String rows) {
         JsonNode r = readUnchecked(rows);
-        return new SourceData.Result(r, r.size(), r.size(), List.of());
+        return new SourceReader.Result(r, r.size(), r.size(), List.of());
     }
 
     private WidgetSpec spec() {

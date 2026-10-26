@@ -1,6 +1,6 @@
 package com.aipb.semantic;
 
-import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -15,7 +15,7 @@ import java.util.*;
 
 /**
  * Answers semantic queries: plans them ({@link QueryPlanner}), compiles each source query ({@link PipelineCompiler}),
- * runs it through {@link SourceData} (the one gateway to the source), and assembles the {@link ResultSet}:
+ * runs it through the {@link SourceReader} (on a page, the driver - not MCP), and assembles the {@link ResultSet}:
  * <ol>
  *   <li>merges the source rows on their dimension values (a comparison query's periods are moved forward by its
  *       shift, so last year's March lines up with this year's);</li>
@@ -32,10 +32,10 @@ public class QueryExecutor {
     private static final String NULL_KEY = "\u0000";
 
     private final SemanticModel model;
-    private final SourceData source;
+    private final SourceReader source;
     private final QueryPlanner planner;
 
-    public QueryExecutor(SemanticModel model, SourceData source) {
+    public QueryExecutor(SemanticModel model, SourceReader source) {
         this.model = model;
         this.source = source;
         this.planner = new QueryPlanner(model);
@@ -58,7 +58,7 @@ public class QueryExecutor {
         boolean truncated = false;
         for (QueryPlanner.PhysicalQuery pq : plan.queries()) {
             ArrayNode pipeline = PipelineCompiler.compile(pq);
-            SourceData.Result r = source.aggregate(pq.model().collection(), pipeline);
+            SourceReader.Result r = source.aggregate(pq.model().collection(), pipeline);
             truncated |= r.truncated();
             executed.add(new ResultSet.Executed(pq.purpose(), pq.model().id(), pq.model().collection(), pipeline, r.count(), r.truncated()));
             results.add(r.documents());

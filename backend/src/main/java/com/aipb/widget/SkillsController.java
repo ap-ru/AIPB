@@ -1,5 +1,6 @@
 package com.aipb.widget;
 
+import com.aipb.identity.Actor;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -7,9 +8,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.*;
 
 /**
- * The Skills window and the approval queue. GET /api/skills lists the widgets for the caller's role (the
- * X-AIPB-Role header); the submission endpoints show one submission (its preview, history and - for a change - the
- * current version beside it) and take an approver's decision.
+ * The Skills window and the approval queue. GET /api/skills lists the widgets for the caller (the
+ * actor from the X-AIPB-Role header); the submission endpoints show one submission (its preview, history and - for a change - the
+ * current version beside it) and take a Reviewer's decision (approve, feedback & revise, reject).
  */
 @RestController
 @RequiredArgsConstructor
@@ -21,12 +22,11 @@ public class SkillsController {
     public record DecisionRequest(String comment) {}
 
     @GetMapping("/api/skills")
-    public Map<String, Object> skills(@RequestHeader(value = Role.HEADER, required = false) String role) {
-        Role r = Role.of(role);
+    public Map<String, Object> skills(Actor actor) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("role", r.key());
-        m.put("attention", workflow.attention(r));
-        m.put("sections", workflow.skills(r));
+        m.put("role", actor.role().id());
+        m.put("attention", workflow.attention(actor));
+        m.put("sections", workflow.skills(actor));
         return m;
     }
 
@@ -54,20 +54,20 @@ public class SkillsController {
 
     @PostMapping("/api/submissions/{id}/approve")
     public Map<String, Object> approve(@PathVariable String id, @RequestBody(required = false) DecisionRequest req,
-                                       @RequestHeader(value = Role.HEADER, required = false) String role) {
-        return workflow.item(workflow.approve(id, Role.of(role), comment(req)));
+                                       Actor actor) {
+        return workflow.item(workflow.approve(id, actor, comment(req)));
     }
 
     @PostMapping("/api/submissions/{id}/send-back")
     public Map<String, Object> sendBack(@PathVariable String id, @RequestBody(required = false) DecisionRequest req,
-                                        @RequestHeader(value = Role.HEADER, required = false) String role) {
-        return workflow.item(workflow.sendBack(id, Role.of(role), comment(req)));
+                                        Actor actor) {
+        return workflow.item(workflow.sendBack(id, actor, comment(req)));
     }
 
     @PostMapping("/api/submissions/{id}/reject")
     public Map<String, Object> reject(@PathVariable String id, @RequestBody(required = false) DecisionRequest req,
-                                      @RequestHeader(value = Role.HEADER, required = false) String role) {
-        return workflow.item(workflow.reject(id, Role.of(role), comment(req)));
+                                      Actor actor) {
+        return workflow.item(workflow.reject(id, actor, comment(req)));
     }
 
     private static String comment(DecisionRequest req) { return req == null ? null : req.comment(); }

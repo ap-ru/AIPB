@@ -32,6 +32,8 @@ public class AssistantSession {
     @Id
     private String id;
     private String layoutId;
+    /** The actor who started the conversation; only they can continue it (a Reviewer can read it). */
+    private String owner;
     private String pageId;
     /** The page's parameter values when the latest message was sent (e.g. the selected clientId) - the sample values. */
     private Map<String, String> params = new LinkedHashMap<>();
@@ -54,7 +56,7 @@ public class AssistantSession {
     private String submissionId;
     private String approval;            // null until submitted, then the submission's status (pending, changes_requested, approved, rejected)
     private Integer approvedVersion;
-    private String approverFeedback;    // the latest send-back comment, until the widget is resubmitted
+    private String reviewerFeedback;    // the latest feedback & revise comment, until the widget is resubmitted
 
     // modifying a library widget: which one, from which version, and its spec then
     private String modifies;
@@ -78,7 +80,7 @@ public class AssistantSession {
 
     @Data @NoArgsConstructor @AllArgsConstructor
     public static class Turn {
-        private String role;   // user | assistant | approver
+        private String role;   // user | assistant | reviewer
         private String text;
         private String kind;   // message | clarify | answer | decline | reuse | proposal | error
         private Instant at;

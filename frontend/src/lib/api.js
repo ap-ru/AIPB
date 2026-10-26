@@ -1,9 +1,9 @@
 const BASE = import.meta.env.VITE_API_BASE || '';
 
-// The maker-checker role (the sidebar's Builder / Approver toggle), sent with every request.
-let role = 'builder';
-export function setApiRole(r) { role = r; }
-const roleHeader = () => ({ 'X-AIPB-Role': role });
+// The role every request is made as (no sign-in yet: chosen from the sidebar's role dropdown; see platform.jsx).
+let currentRole = 'banker';
+export function setApiRole(role) { currentRole = role; }
+const roleHeader = () => ({ 'X-AIPB-Role': currentRole });
 
 async function request(method, path, body) {
   const res = await fetch(BASE + path, {

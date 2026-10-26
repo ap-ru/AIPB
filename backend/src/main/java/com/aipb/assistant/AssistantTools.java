@@ -2,6 +2,7 @@ package com.aipb.assistant;
 
 import com.aipb.assistant.llm.LlmRequest;
 import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.aipb.source.SourceException;
 import com.aipb.widget.ParamBinder;
 import com.aipb.widget.WidgetSpec;
@@ -71,7 +72,7 @@ public class AssistantTools {
                 projection = new LinkedHashMap<>();
                 for (JsonNode f : in.get("fields")) projection.put(field(f.asText()), 1);
             }
-            SourceData.Result r = source.find(coll, filter, projection, null, limit);
+            SourceReader.Result r = source.find(coll, filter, projection, null, limit);
             ObjectNode out = F.objectNode();
             out.put("returned", r.count());
             out.set("documents", trim(r.documents(), 0));
@@ -90,7 +91,7 @@ public class AssistantTools {
             pipeline.addObject().set("$group", F.objectNode().put("_id", "$" + field).set("count", F.objectNode().put("$sum", 1)));
             pipeline.addObject().set("$sort", F.objectNode().put("count", -1).put("_id", 1));
             pipeline.addObject().put("$limit", MAX_DISTINCT);
-            SourceData.Result r = source.aggregate(coll, pipeline);
+            SourceReader.Result r = source.aggregate(coll, pipeline);
             ArrayNode values = F.arrayNode();
             r.documents().forEach(d -> values.addObject().<ObjectNode>set("value", trim(d.get("_id"), 0)).put("count", d.path("count").asLong()));
             ObjectNode out = F.objectNode();
@@ -109,7 +110,7 @@ public class AssistantTools {
             ArrayNode pipeline = pipeline(in);
             WidgetSpec spec = provisional(coll, pipeline, in.path("params"));
             ParamBinder.Bound bound = ParamBinder.bind(spec, ctx.sampleParams(), source::asOfDate);
-            SourceData.Result r = source.aggregate(coll, (ArrayNode) bound.pipeline());
+            SourceReader.Result r = source.aggregate(coll, (ArrayNode) bound.pipeline());
             ObjectNode out = F.objectNode();
             out.put("rowCount", r.count());
             if (r.total() != null) out.put("totalMatched", r.total());

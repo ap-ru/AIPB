@@ -22,15 +22,25 @@ aipb:
     enabled: ${AIPB_SEED:true}
     reset-on-start: ${AIPB_RESET:false}
   source:
-    # Source data (MongoDB) is read only through the MongoDB MCP server; every call is pinned to this database.
-    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp}
+    # Source data (MongoDB), always pinned to this database and read-only. Pages read it with the driver (uri, as
+    # bank_reader); the assistant explores it through the MongoDB MCP server (mcp-url).
+    uri: ${AIPB_SOURCE_URI:mongodb://localhost:27017/bank}
     database: ${AIPB_SOURCE_DB:bank}
+    # the same caps the MCP server applies
+    max-documents: 1000
+    max-time-ms: 10000
+    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp}
     timeout-seconds: ${AIPB_MCP_TIMEOUT:20}
   assistant:
     # The widget assistant (com.aipb.assistant). Disabled when no API key is set.
     api-key: ${ANTHROPIC_API_KEY:}
     base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
-    model: ${AIPB_ASSISTANT_MODEL:claude-opus-5-5}
+    # model per stage: Haiku for the light stages, Sonnet for the reasoning-heavy ones
+    model:
+      intake: ${AIPB_MODEL_INTAKE:claude-haiku-5-5}
+      build: ${AIPB_MODEL_BUILD:claude-sonnet-5-5}
+      review: ${AIPB_MODEL_REVIEW:claude-sonnet-5-5}
+      present: ${AIPB_MODEL_PRESENT:claude-haiku-5-5}
     # low | medium | high | xhigh | max per stage; thinking is always on, so effort sets depth, latency and cost
     effort:
       intake: ${AIPB_EFFORT_INTAKE:medium}
@@ -47,12 +57,11 @@ aipb:
     max-submits: 4
     max-present-attempts: 3
     run-timeout-seconds: 360
-    # USD per million tokens (claude-opus-5-5), for the per-session cost estimate
+    # USD per million tokens by model, for the per-session cost estimate (Haiku rates are for prompts up to 100K tokens)
     price:
-      input: 4.0
-      output: 20.0
-      cache-read: 0.2
-      cache-write: 5.0
+      "[claude-haiku-5-5]": { input: 0.10, output: 0.50, cache-read: 0.01, cache-write: 0.125 }
+      "[claude-sonnet-5-5]": { input: 2.0, output: 10.0, cache-read: 0.2, cache-write: 2.5 }
+      "[claude-opus-5-5]": { input: 4.0, output: 20.0, cache-read: 0.2, cache-write: 5.0 }
   cors:
     allowed-origins: ${AIPB_CORS:http://localhost:3000,http://localhost:5173}
 

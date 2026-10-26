@@ -98,7 +98,7 @@ public class StageRunner {
     private LlmReply call(String stage, List<ContextAssembler.Block> system, List<LlmRequest.ToolDef> tools,
                           List<LlmMessage> messages, JsonNode schema, RunRecorder rec, Instant deadline) {
         if (Instant.now().isAfter(deadline)) throw new StageFailure("This took too long and was stopped; please try again.");
-        LlmRequest req = new LlmRequest(stage, props.getModel(), props.effort(stage), props.maxTokens(stage),
+        LlmRequest req = new LlmRequest(stage, props.model(stage), props.effort(stage), props.maxTokens(stage),
                 ContextAssembler.texts(system), tools, List.copyOf(messages), schema);
         LlmReply reply = gateway.send(req);
         rec.call(reply.usage());

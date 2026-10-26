@@ -1,5 +1,7 @@
 package com.aipb.widget;
 
+import com.aipb.identity.Actor;
+import com.aipb.identity.Role;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,6 +25,9 @@ class WidgetWorkflowTest {
     private final List<WidgetWorkflow.Decision> decisions = new ArrayList<>();
     private WidgetLibrary library;
     private WidgetWorkflow workflow;
+    private static final Actor BUILDER = Actor.of(Role.BUILDER);
+    private static final Actor REVIEWER = Actor.of(Role.REVIEWER);
+    private static final Actor BANKER = Actor.of(Role.BANKER);
 
     @BeforeEach
     void setUp() {
@@ -46,7 +51,7 @@ class WidgetWorkflowTest {
         when(library.find(anyString())).thenAnswer(i -> Optional.ofNullable(widgets.get((String) i.getArgument(0))));
         when(library.get(anyString())).thenAnswer(i -> Optional.ofNullable(widgets.get((String) i.getArgument(0)))
                 .orElseThrow(() -> new NoSuchElementException("widget " + i.getArgument(0))));
-        when(library.publish(any(), anyInt(), any(), any(), any(), any(), any())).thenAnswer(i -> {
+        when(library.publish(any(), anyInt(), any(), any(), any(), any(), any(), any())).thenAnswer(i -> {
             WidgetLibrary.Checked c = i.getArgument(0);
             WidgetDefinition d = widgets.getOrDefault(c.parsed().id(), new WidgetDefinition());
             d.setId(c.parsed().id());
@@ -84,47 +89,59 @@ class WidgetWorkflowTest {
 
     @Test
     void aBuildersWidgetWaitsAndNothingIsPublished() {
-        WidgetSubmission s = workflow.submit(newWidget("w"), Role.BUILDER);
+        WidgetSubmission s = workflow.submit(newWidget("w"), BUILDER);
         assertThat(s.getStatus()).isEqualTo(WidgetSubmission.PENDING);
         assertThat(s.getBaseVersion()).isNull();
-        verify(library, never()).publish(any(), anyInt(), any(), any(), any(), any(), any());
+        verify(library, never()).publish(any(), anyInt(), any(), any(), any(), any(), any(), any());
         assertThat(decisions).extracting(WidgetWorkflow.Decision::type).containsExactly("submitted");
     }
 
     @Test
     void anApproversWidgetIsApprovedAsVersionOne() {
-        WidgetSubmission s = workflow.submit(newWidget("w"), Role.APPROVER);
+        WidgetSubmission s = workflow.submit(newWidget("w"), REVIEWER);
         assertThat(s.getStatus()).isEqualTo(WidgetSubmission.APPROVED);
         assertThat(s.getApprovedVersion()).isEqualTo(1);
-        verify(library).publish(any(), eq(1), eq(WidgetDefinition.BUILT), eq(WidgetVersion.APPROVED), eq(s.getId()), isNull(), eq("approver"));
+        verify(library).publish(any(), eq(1), eq(WidgetDefinition.BUILT), eq(WidgetVersion.APPROVED), eq(s.getId()), isNull(), eq("reviewer"), any());
         assertThat(s.getHistory()).extracting(WidgetSubmission.Event::getType).containsExactly("submitted", "approved");
+        assertThat(s.getSubmittedBy()).isEqualTo("demo-reviewer");
     }
 
     @Test
     void onlyAnApproverDecides() {
-        WidgetSubmission s = workflow.submit(newWidget("w"), Role.BUILDER);
-        assertThatThrownBy(() -> workflow.approve(s.getId(), Role.BUILDER, null)).isInstanceOf(Role.Forbidden.class);
-        assertThatThrownBy(() -> workflow.sendBack(s.getId(), Role.BUILDER, "x")).isInstanceOf(Role.Forbidden.class);
-        assertThatThrownBy(() -> workflow.reject(s.getId(), Role.BUILDER, "x")).isInstanceOf(Role.Forbidden.class);
-        assertThatThrownBy(() -> workflow.restore("w", 1, Role.BUILDER)).isInstanceOf(Role.Forbidden.class);
+        WidgetSubmission s = workflow.submit(newWidget("w"), BUILDER);
+        assertThatThrownBy(() -> workflow.approve(s.getId(), BUILDER, null)).isInstanceOf(Actor.Forbidden.class);
+        assertThatThrownBy(() -> workflow.sendBack(s.getId(), BUILDER, "x")).isInstanceOf(Actor.Forbidden.class);
+        assertThatThrownBy(() -> workflow.reject(s.getId(), BUILDER, "x")).isInstanceOf(Actor.Forbidden.class);
+        assertThatThrownBy(() -> workflow.restore("w", 1, BUILDER)).isInstanceOf(Actor.Forbidden.class);
     }
 
     @Test
-    void sendBackNeedsACommentAndTheResubmissionWaitsAgain() {
-        WidgetSubmission s = workflow.submit(newWidget("w"), Role.BUILDER);
-        assertThatThrownBy(() -> workflow.sendBack(s.getId(), Role.APPROVER, " ")).isInstanceOf(IllegalArgumentException.class);
-        workflow.sendBack(s.getId(), Role.APPROVER, "Use 12 months");
+    void aBankerCannotBuildAndOnlyTheBuilderWhoSubmittedCanRevise() {
+        assertThatThrownBy(() -> workflow.submit(newWidget("w"), BANKER)).isInstanceOf(Actor.Forbidden.class);
+        WidgetSubmission s = workflow.submit(newWidget("w"), BUILDER);
+        assertThat(s.getSubmittedBy()).isEqualTo("demo-builder");
+        Actor otherBuilder = new Actor("someone-else", Role.BUILDER);
+        assertThatThrownBy(() -> workflow.resubmit(s.getId(), spec("w", "x"), otherBuilder)).isInstanceOf(Actor.Forbidden.class);
+        assertThat(workflow.skills(otherBuilder).get(0).get("items")).asList().isEmpty();
+        assertThat(workflow.skills(BANKER)).extracting(m -> m.get("key")).containsExactly("approved", "stock");
+    }
+
+    @Test
+    void feedbackAndReviseNeedsACommentAndTheResubmissionWaitsAgain() {
+        WidgetSubmission s = workflow.submit(newWidget("w"), BUILDER);
+        assertThatThrownBy(() -> workflow.sendBack(s.getId(), REVIEWER, " ")).isInstanceOf(IllegalArgumentException.class);
+        workflow.sendBack(s.getId(), REVIEWER, "Use 12 months");
         assertThat(store.get(s.getId()).getStatus()).isEqualTo(WidgetSubmission.CHANGES_REQUESTED);
         assertThat(store.get(s.getId()).lastComment()).isEqualTo("Use 12 months");
-        assertThatThrownBy(() -> workflow.approve(s.getId(), Role.APPROVER, null)).isInstanceOf(WidgetWorkflow.Conflict.class);
+        assertThatThrownBy(() -> workflow.approve(s.getId(), REVIEWER, null)).isInstanceOf(WidgetWorkflow.Conflict.class);
 
-        WidgetSubmission again = workflow.resubmit(s.getId(), spec("renamed-by-model", "Revised"), Role.BUILDER);
+        WidgetSubmission again = workflow.resubmit(s.getId(), spec("renamed-by-model", "Revised"), BUILDER);
         assertThat(again.getStatus()).isEqualTo(WidgetSubmission.PENDING);
         assertThat(again.getWidgetId()).isEqualTo("w");
         assertThat(again.getTitle()).isEqualTo("Revised");
         assertThat(workflow.spec(again).path("id").asText()).isEqualTo("w");
 
-        workflow.approve(s.getId(), Role.APPROVER, "Looks right");
+        workflow.approve(s.getId(), REVIEWER, "Looks right");
         assertThat(store.get(s.getId()).getApprovedVersion()).isEqualTo(1);
         assertThat(store.get(s.getId()).getHistory()).extracting(WidgetSubmission.Event::getType)
                 .containsExactly("submitted", "sent_back", "resubmitted", "approved");
@@ -132,11 +149,11 @@ class WidgetWorkflowTest {
 
     @Test
     void aRejectionIsFinalAndNeedsAReason() {
-        WidgetSubmission s = workflow.submit(newWidget("w"), Role.BUILDER);
-        assertThatThrownBy(() -> workflow.reject(s.getId(), Role.APPROVER, null)).isInstanceOf(IllegalArgumentException.class);
-        workflow.reject(s.getId(), Role.APPROVER, "Duplicates the revenue widget");
-        assertThatThrownBy(() -> workflow.resubmit(s.getId(), spec("w", "x"), Role.BUILDER)).isInstanceOf(WidgetWorkflow.Conflict.class);
-        assertThatThrownBy(() -> workflow.approve(s.getId(), Role.APPROVER, null)).isInstanceOf(WidgetWorkflow.Conflict.class);
+        WidgetSubmission s = workflow.submit(newWidget("w"), BUILDER);
+        assertThatThrownBy(() -> workflow.reject(s.getId(), REVIEWER, null)).isInstanceOf(IllegalArgumentException.class);
+        workflow.reject(s.getId(), REVIEWER, "Duplicates the revenue widget");
+        assertThatThrownBy(() -> workflow.resubmit(s.getId(), spec("w", "x"), BUILDER)).isInstanceOf(WidgetWorkflow.Conflict.class);
+        assertThatThrownBy(() -> workflow.approve(s.getId(), REVIEWER, null)).isInstanceOf(WidgetWorkflow.Conflict.class);
     }
 
     @Test
@@ -144,13 +161,13 @@ class WidgetWorkflowTest {
         stock("client-exposure", 4);
         WidgetWorkflow.Submit change = new WidgetWorkflow.Submit(spec("any-id", "Exposure v2"), "assistant", "s", "default", "client",
                 Map.of(), "client-exposure");
-        WidgetSubmission s = workflow.submit(change, Role.BUILDER);
+        WidgetSubmission s = workflow.submit(change, BUILDER);
         assertThat(s.getWidgetId()).isEqualTo("client-exposure");
         assertThat(s.getBaseVersion()).isEqualTo(4);
-        assertThatThrownBy(() -> workflow.submit(change, Role.BUILDER)).isInstanceOf(WidgetWorkflow.Conflict.class);
+        assertThatThrownBy(() -> workflow.submit(change, BUILDER)).isInstanceOf(WidgetWorkflow.Conflict.class);
         assertThat(workflow.idTaken("client-exposure")).isTrue();
 
-        workflow.approve(s.getId(), Role.APPROVER, null);
+        workflow.approve(s.getId(), REVIEWER, null);
         assertThat(widgets.get("client-exposure").getVersion()).isEqualTo(5);
         assertThat(widgets.get("client-exposure").getOrigin()).isEqualTo(WidgetDefinition.STOCK); // still listed as stock
     }
@@ -158,7 +175,7 @@ class WidgetWorkflowTest {
     @Test
     void aNewWidgetCannotTakeAnExistingId() {
         stock("client-exposure", 1);
-        assertThatThrownBy(() -> workflow.submit(newWidget("client-exposure"), Role.BUILDER)).isInstanceOf(WidgetLibrary.DuplicateException.class);
+        assertThatThrownBy(() -> workflow.submit(newWidget("client-exposure"), BUILDER)).isInstanceOf(WidgetLibrary.DuplicateException.class);
     }
 
     @Test
@@ -171,9 +188,9 @@ class WidgetWorkflowTest {
         when(library.spec(v1)).thenReturn(spec("client-exposure", "Exposure as it was"));
         when(library.sampleParams(any())).thenReturn(Map.of());
 
-        assertThatThrownBy(() -> workflow.restore("client-exposure", 3, Role.APPROVER)).isInstanceOf(IllegalArgumentException.class);
-        workflow.restore("client-exposure", 1, Role.APPROVER);
-        verify(library).publish(any(), eq(4), eq(WidgetDefinition.STOCK), eq(WidgetVersion.RESTORE), isNull(), eq(1), eq("approver"));
+        assertThatThrownBy(() -> workflow.restore("client-exposure", 3, REVIEWER)).isInstanceOf(IllegalArgumentException.class);
+        workflow.restore("client-exposure", 1, REVIEWER);
+        verify(library).publish(any(), eq(4), eq(WidgetDefinition.STOCK), eq(WidgetVersion.RESTORE), isNull(), eq(1), eq("reviewer"), any());
         assertThat(widgets.get("client-exposure").getTitle()).isEqualTo("Exposure as it was");
     }
 
@@ -181,22 +198,22 @@ class WidgetWorkflowTest {
     void skillsListsSectionsInTheOrderEachRoleSeesThem() {
         stock("client-exposure", 1);
         when(library.list()).thenAnswer(i -> new ArrayList<>(widgets.values()));
-        WidgetSubmission pending = workflow.submit(newWidget("a"), Role.BUILDER);
-        WidgetSubmission back = workflow.submit(newWidget("b"), Role.BUILDER);
-        workflow.sendBack(back.getId(), Role.APPROVER, "fix");
-        workflow.submit(newWidget("c"), Role.APPROVER);
+        WidgetSubmission pending = workflow.submit(newWidget("a"), BUILDER);
+        WidgetSubmission back = workflow.submit(newWidget("b"), BUILDER);
+        workflow.sendBack(back.getId(), REVIEWER, "fix");
+        workflow.submit(newWidget("c"), REVIEWER);
 
-        List<Map<String, Object>> builder = workflow.skills(Role.BUILDER);
+        List<Map<String, Object>> builder = workflow.skills(BUILDER);
         assertThat(builder).extracting(m -> m.get("key")).containsExactly("mine", "approved", "stock");
         assertThat(ids(builder.get(0))).containsExactlyInAnyOrder(pending.getId(), back.getId());
         assertThat(ids(builder.get(1))).containsExactly("c");
         assertThat(ids(builder.get(2))).containsExactly("client-exposure");
 
-        List<Map<String, Object>> approver = workflow.skills(Role.APPROVER);
+        List<Map<String, Object>> approver = workflow.skills(REVIEWER);
         assertThat(approver).extracting(m -> m.get("key")).containsExactly("review", "approved", "stock");
         assertThat(ids(approver.get(0))).containsExactly(pending.getId());
-        assertThat(workflow.attention(Role.APPROVER)).isEqualTo(1);
-        assertThat(workflow.attention(Role.BUILDER)).isEqualTo(1);
+        assertThat(workflow.attention(REVIEWER)).isEqualTo(1);
+        assertThat(workflow.attention(BUILDER)).isEqualTo(1);
     }
 
     @SuppressWarnings("unchecked")

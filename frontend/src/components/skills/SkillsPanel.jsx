@@ -6,7 +6,7 @@ import Icon from '../Icon.jsx';
 
 const STATUS = {
   pending: ['Pending approval', 'amber'],
-  changes_requested: ['Changes requested', 'pink'],
+  changes_requested: ['Feedback & revise', 'pink'],
   rejected: ['Rejected', 'red'],
   approved: ['Approved', 'green'],
 };
@@ -67,7 +67,7 @@ function Item({ item, showVersion, onOpen }) {
   );
 }
 
-/** Approver only: every version of a widget, with a preview and Restore for each older one. */
+/** Reviewer only: every version of a widget, with a preview and Restore for each older one. */
 function Versions({ widget, pageParams, onRestored }) {
   const [list, setList] = useState(null);
   const [open, setOpen] = useState(null);
@@ -113,9 +113,9 @@ function Versions({ widget, pageParams, onRestored }) {
   );
 }
 
-/** An approved or stock widget: preview, Add to page, Modify; for an approver, its versions. */
+/** An approved or stock widget: preview, Add to page, Modify; for a Reviewer, its versions. */
 function WidgetDetail({ item, page, pageParams, onModify, onChanged }) {
-  const { role, addWidget } = usePlatform();
+  const { can, addWidget } = usePlatform();
   const [widget, setWidget] = useState(item);
   const [data, setData] = useState(null);
   const [problem, setProblem] = useState(null);
@@ -155,14 +155,14 @@ function WidgetDetail({ item, page, pageParams, onModify, onChanged }) {
           title={widget.pendingChange ? 'A change to this widget is already waiting for approval' : 'Change it with the assistant; the new version goes for approval'}>
           <Icon name="edit" size={12} /> Modify</button>
       </div>
-      {role === 'approver' && <Versions widget={widget} pageParams={pageParams} onRestored={restored} />}
+      {can.canReview && <Versions widget={widget} pageParams={pageParams} onRestored={restored} />}
     </div>
   );
 }
 
 /** A submission: proposal (beside the current version, for a change), history, and the actions the role allows. */
 function SubmissionDetail({ item, pageParams, onOpenSession, onChanged }) {
-  const { role } = usePlatform();
+  const { can } = usePlatform();
   const [sub, setSub] = useState(null);
   const [problem, setProblem] = useState(null);
   const [comment, setComment] = useState('');
@@ -181,7 +181,7 @@ function SubmissionDetail({ item, pageParams, onOpenSession, onChanged }) {
   };
   if (!sub) return problem ? <div className="error-box">⚠ {problem}</div> : <div className="muted" style={{ fontSize: 12 }}>Loading…</div>;
   const pending = sub.status === 'pending';
-  const approver = role === 'approver';
+  const reviewer = can.canReview;
   return (
     <div className="stack" style={{ gap: 14 }}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
@@ -202,7 +202,7 @@ function SubmissionDetail({ item, pageParams, onOpenSession, onChanged }) {
         <div className="label">History</div>
         <ul className="skill-history">
           {sub.history.map((e, i) => (
-            <li key={i}><b>{e.type.replace('_', ' ')}</b> <span className="dim">by {e.role} · {when(e.at)}</span>
+            <li key={i}><b>{e.type === 'sent_back' ? 'feedback & revise' : e.type.replace('_', ' ')}</b> <span className="dim">by {e.role} · {when(e.at)}</span>
               {e.comment && <div className="skill-comment">“{e.comment}”</div>}</li>
           ))}
         </ul>
@@ -213,7 +213,7 @@ function SubmissionDetail({ item, pageParams, onOpenSession, onChanged }) {
           <button className="pv-why" onClick={showConversation}>{turns ? 'Hide conversation' : 'Show the conversation'}</button>
           {turns && (
             <div className="skill-turns">
-              {turns.map((t, i) => <div key={i} className={'skill-turn ' + t.role}><b>{t.role === 'user' ? 'Builder' : t.role === 'approver' ? 'Approver' : 'Assistant'}:</b> {t.text}</div>)}
+              {turns.map((t, i) => <div key={i} className={'skill-turn ' + t.role}><b>{t.role === 'user' ? 'Builder' : t.role === 'reviewer' ? 'Reviewer' : 'Assistant'}:</b> {t.text}</div>)}
             </div>
           )}
         </div>
@@ -221,25 +221,25 @@ function SubmissionDetail({ item, pageParams, onOpenSession, onChanged }) {
 
       {problem && <div className="error-box">⚠ {problem}</div>}
 
-      {approver && pending && (
+      {reviewer && pending && (
         <div className="skill-decide">
           <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)}
-            placeholder="Comment - required to send back (what to change) or reject (why)" />
+            placeholder="Comment - required for feedback & revise (what to change) or reject (why)" />
           <div className="row">
             <button className="btn primary small" disabled={busy} onClick={() => decide('approve')}>Approve</button>
-            <button className="btn small" disabled={busy || !comment.trim()} onClick={() => decide('sendBack')}>Send back with changes</button>
+            <button className="btn small" disabled={busy || !comment.trim()} onClick={() => decide('sendBack')}>Feedback &amp; revise</button>
             <button className="btn small danger" disabled={busy || !comment.trim()} onClick={() => decide('reject')}>Reject</button>
           </div>
         </div>
       )}
-      {!approver && sub.sessionId && (sub.status === 'changes_requested' || pending) && (
+      {!reviewer && sub.sessionId && (sub.status === 'changes_requested' || pending) && (
         <div className="row">
           <button className={'btn small' + (sub.status === 'changes_requested' ? ' primary' : '')} onClick={() => onOpenSession(sub.sessionId, sub.pageId)}>
             <Icon name="spark" size={12} /> {sub.status === 'changes_requested' ? 'Open chat to revise' : 'Open chat'}</button>
-          {pending && <span className="muted" style={{ fontSize: 12 }}>Waiting for an approver. You can still change it from the chat.</span>}
+          {pending && <span className="muted" style={{ fontSize: 12 }}>Waiting for a Reviewer. You can still change it from the chat.</span>}
         </div>
       )}
-      {!approver && !sub.sessionId && sub.status === 'changes_requested' && (
+      {!reviewer && !sub.sessionId && sub.status === 'changes_requested' && (
         <div className="muted" style={{ fontSize: 12 }}>Made in the workbench: revise it there (Widget → Write a spec) and submit it again with the same id.</div>
       )}
       {sub.status === 'rejected' &&<div className="muted" style={{ fontSize: 12 }}>Rejected widgets are closed. Start a new chat to build another.</div>}
@@ -249,10 +249,10 @@ function SubmissionDetail({ item, pageParams, onOpenSession, onChanged }) {
 
 /**
  * The Skills window: every widget the role can use or act on. A builder sees their widgets in progress, then the
- * approved and stock widgets; an approver sees what waits for approval, then approved, then stock.
+ * approved and stock widgets; a Reviewer sees what waits for approval, then approved, then stock.
  */
 export default function SkillsPanel({ page, pageParams, onClose, onOpenSession, onModify, onChanged }) {
-  const { role } = usePlatform();
+  const { role, can } = usePlatform();
   const [data, setData] = useState(null);
   const [problem, setProblem] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -265,7 +265,7 @@ export default function SkillsPanel({ page, pageParams, onClose, onOpenSession, 
         <div className="modal-head">
           {selected && <button className="btn ghost small" onClick={() => { setSelected(null); load(); }}><Icon name="left" size={14} /> Skills</button>}
           <h3 style={{ margin: 0, fontSize: 15 }}>{selected ? selected.title : 'Skills'}</h3>
-          {!selected && <span className="tag violet">{role === 'approver' ? 'Approver' : 'Builder'}</span>}
+          {!selected && <span className="tag violet">{can.label || role}</span>}
           <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
         <div className="modal-body">

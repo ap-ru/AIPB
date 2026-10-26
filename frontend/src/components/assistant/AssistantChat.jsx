@@ -82,12 +82,12 @@ function Approval({ session, page, busy, onPlace, placedHere }) {
     );
   }
   if (session.approval === 'rejected') return <div className="pv-actions"><span className="tag red">Rejected</span><span className="pv-hint">Start a new chat to build another.</span></div>;
-  if (session.approval === 'changes_requested') return <div className="pv-actions"><span className="tag pink">Changes requested</span><span className="pv-hint">Reply with the changes, then resubmit.</span></div>;
+  if (session.approval === 'changes_requested') return <div className="pv-actions"><span className="tag pink">Feedback &amp; revise</span><span className="pv-hint">Reply with the changes, then resubmit.</span></div>;
   return <div className="pv-actions"><span className="tag amber">Pending approval</span><span className="pv-hint">You can still reply with changes and resubmit.</span></div>;
 }
 
 /** A proposal, previewed in the same card chrome a placed widget gets, with the submit actions under it. */
-function Proposal({ proposal, reviewState, placed, submitted, session, role, busy, page, onAdd, onVerify, onView, onPlace, placedHere }) {
+function Proposal({ proposal, reviewState, placed, submitted, session, reviewer, busy, page, onAdd, onVerify, onView, onPlace, placedHere }) {
   const [confirm, setConfirm] = useState(false);
   const [open, setOpen] = useState(false);
   const failed = reviewState === 'failed' && proposal.kind === 'new';
@@ -95,7 +95,7 @@ function Proposal({ proposal, reviewState, placed, submitted, session, role, bus
   const reuse = proposal.kind === 'reuse';
   const resubmit = ['pending', 'changes_requested'].includes(session.approval);
   const label = reuse ? <><Icon name="plus" size={12} /> Add to {page.title}</>
-    : role === 'approver' ? <>Approve{resubmit ? ' changes' : ''}</>
+    : reviewer ? <>Approve{resubmit ? ' changes' : ''}</>
     : resubmit ? 'Resubmit for approval' : 'Submit for approval';
   return (
     <div className="pv">
@@ -144,7 +144,7 @@ function Proposal({ proposal, reviewState, placed, submitted, session, role, bus
           )}
           <div className="pv-actions">
             <button className="btn primary small" disabled={busy || (failed && !confirm)} onClick={() => onAdd(confirm)}
-              title={reuse ? 'Already approved: adds it to the page' : role === 'approver' ? 'Approve it into the library' : 'Send it to an approver; it is not added anywhere until approved'}>
+              title={reuse ? 'Already approved: adds it to the page' : reviewer ? 'Approve it into the library' : 'Send it to a Reviewer; it is not added anywhere until approved'}>
               {label}</button>
             {proposal.kind === 'new' && reviewState !== 'passed' && (
               <button className="btn small" disabled={busy} onClick={onVerify} title="An independent check of the numbers (uses extra tokens)">Verify numbers</button>
@@ -173,7 +173,7 @@ function Earlier({ earlier }) {
           <div className="label">{e.title}{e.version ? ` · became v${e.version}` : ' · not approved'}</div>
           {(e.turns || []).map((t, j) => (
             <div key={j} className={'skill-turn ' + t.role}>
-              <b>{t.role === 'user' ? 'Builder' : t.role === 'approver' ? 'Approver' : 'Assistant'}:</b> {t.text}
+              <b>{t.role === 'user' ? 'Builder' : t.role === 'reviewer' ? 'Reviewer' : 'Assistant'}:</b> {t.text}
             </div>
           ))}
         </div>
@@ -237,7 +237,7 @@ function Composer({ value, onChange, onSend, running, disabled, autoFocus, place
  * Kept mounted while hidden, so going back to the dashboard and returning keeps the conversation.
  */
 export default function AssistantChat({ page, pageParams, toolbar, onClose, openSessionId, onElsewhere }) {
-  const { setLayout, role, addWidget } = usePlatform();
+  const { setLayout, role, can, addWidget } = usePlatform();
   const [showSkills, setShowSkills] = useState(false);
   const [attention, setAttention] = useState(0);
   const [placedHere, setPlacedHere] = useState(false);
@@ -274,7 +274,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
     try { await show(await assistant.create(LAYOUT_ID, page.id, pageParams, widget.id)); } catch (e) { setProblem(e.message); }
   };
   useEffect(() => { if (openSessionId) openSession(openSessionId); }, [openSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-  // decisions an approver takes elsewhere show up in an open conversation
+  // decisions a Reviewer takes elsewhere show up in an open conversation
   useEffect(() => {
     if (!session?.submissionId || running) return undefined;
     const t = setInterval(() => assistant.session(session.id).then((s) => {
@@ -357,7 +357,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
         <div className="spacer" />
         {toolbar}
         <button className="btn small skills-btn" onClick={() => setShowSkills(true)}
-          title={role === 'approver' ? 'Widgets waiting for approval, approved and stock widgets' : 'Your widgets in progress, approved and stock widgets'}>
+          title={can.canReview ? 'Widgets waiting for approval, approved and stock widgets' : 'Your widgets in progress, approved and stock widgets'}>
           <Icon name="skill" size={12} /> Skills{attention > 0 && <span className="count-badge" aria-label={attention + ' need attention'}>{attention}</span>}
         </button>
         <button className="btn small" onClick={reset} disabled={running || empty} title="Start a new conversation"><Icon name="plus" size={12} /> New chat</button>
@@ -374,9 +374,9 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
             <div className="chat-hero">
               <div className="chat-hero-mark"><Icon name="spark" size={22} stroke={2} /></div>
               <h1>What should we add to {page.title}?</h1>
-              <p>Describe a widget in plain words. I’ll find the data, check it, and show you a live preview. {role === 'approver'
+              <p>Describe a widget in plain words. I’ll find the data, check it, and show you a live preview. {can.canReview
                 ? 'You approve it into the library, then add it where you want it.'
-                : 'You submit it for approval; it can be added to pages once an approver approves it.'}</p>
+                : 'You submit it for approval; it can be added to pages once a Reviewer approves it.'}</p>
               {composer}
               <div className="chat-suggest">
                 {SUGGESTIONS[forClient ? 'client' : 'book'].map((s) => (
@@ -389,10 +389,10 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
               <Earlier key={session?.id} earlier={session?.earlier} />
               {turns.map((t, i) => t.role === 'user' ? (
                 <div key={i} className="msg user"><div className="msg-bubble">{t.text}</div></div>
-              ) : t.role === 'approver' ? (
-                <div key={i} className={'msg approver ' + (t.kind || '')}>
-                  <div className="msg-avatar approver" aria-hidden="true"><Icon name="flag" size={14} stroke={2} /></div>
-                  <div className="msg-main"><div className="msg-who">Approver</div><div className="msg-text">{t.text}</div></div>
+              ) : t.role === 'reviewer' ? (
+                <div key={i} className={'msg reviewer ' + (t.kind || '')}>
+                  <div className="msg-avatar reviewer" aria-hidden="true"><Icon name="flag" size={14} stroke={2} /></div>
+                  <div className="msg-main"><div className="msg-who">Reviewer</div><div className="msg-text">{t.text}</div></div>
                 </div>
               ) : (
                 <div key={i} className={'msg assistant ' + (t.kind || '')}>
@@ -401,7 +401,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
                     <div className="msg-text">{t.text}</div>
                     {i === lastProposal && session.proposal && (
                       <Proposal proposal={session.proposal} reviewState={session.reviewState} placed={session.status === 'placed'}
-                        submitted={submitted} session={session} role={role} placedHere={placedHere}
+                        submitted={submitted} session={session} reviewer={can.canReview} placedHere={placedHere}
                         busy={running} page={page} onAdd={add} onVerify={verify} onView={onClose} onPlace={place} />
                     )}
                   </div>

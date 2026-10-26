@@ -1,5 +1,6 @@
 package com.aipb.widget;
 
+import com.aipb.identity.Actor;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -37,14 +38,14 @@ public class WidgetController {
         return m;
     }
 
-    /** A new widget from the workbench: a builder's waits for approval; an approver's is approved as it is saved. */
+    /** A new widget from the workbench: a Builder's waits for approval; a Reviewer's is approved as it is saved. */
     @PostMapping("/library")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String, Object> create(@RequestBody SpecRequest req, @RequestHeader(value = Role.HEADER, required = false) String role) {
+    public Map<String, Object> create(@RequestBody SpecRequest req, Actor actor) {
         Optional<WidgetSubmission> open = resubmittable(required(req).path("id").asText());
-        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), Role.of(role)));
+        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), actor));
         return submitted(workflow.submit(new WidgetWorkflow.Submit(required(req), "workbench", null, req.layoutId(), req.pageId(),
-                req.params(), null), Role.of(role)));
+                req.params(), null), actor));
     }
 
     /** A workbench widget waiting for approval (or sent back) is revised by submitting its id again. */
@@ -55,13 +56,13 @@ public class WidgetController {
     /** A change to a library widget from the workbench, submitted as its next version. */
     @PutMapping("/library/{id}")
     public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req,
-                                      @RequestHeader(value = Role.HEADER, required = false) String role) {
+                                      Actor actor) {
         if (!id.equals(required(req).path("id").asText()))
             throw new IllegalArgumentException("spec id '" + req.spec().path("id").asText() + "' does not match '" + id + "'");
         Optional<WidgetSubmission> open = resubmittable(id);
-        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), Role.of(role)));
+        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), actor));
         return submitted(workflow.submit(new WidgetWorkflow.Submit(req.spec(), "workbench", null, req.layoutId(), req.pageId(),
-                req.params(), id), Role.of(role)));
+                req.params(), id), actor));
     }
 
     /** A live preview of a library widget outside a page: request values (e.g. clientId) over its sample values. */
@@ -71,19 +72,19 @@ public class WidgetController {
         return preview(library.spec(d), workflow.preview(library.spec(d), null, null, params));
     }
 
-    /** Every version of a widget, newest first (approvers only). */
+    /** Every version of a widget, newest first (Reviewers only). */
     @GetMapping("/library/{id}/versions")
-    public List<Map<String, Object>> versions(@PathVariable String id, @RequestHeader(value = Role.HEADER, required = false) String role) {
-        Role.of(role).requireApprover("see a widget's version history");
+    public List<Map<String, Object>> versions(@PathVariable String id, Actor actor) {
+        actor.requireReviewer("see a widget's version history");
         int current = library.get(id).getVersion();
         return library.history(id).stream().map(v -> version(v, current)).toList();
     }
 
-    /** One version, with a live preview (approvers only). */
+    /** One version, with a live preview (Reviewers only). */
     @GetMapping("/library/{id}/versions/{version}")
     public Map<String, Object> version(@PathVariable String id, @PathVariable int version, @RequestParam Map<String, String> params,
-                                       @RequestHeader(value = Role.HEADER, required = false) String role) {
-        Role.of(role).requireApprover("see a widget's version history");
+                                       Actor actor) {
+        actor.requireReviewer("see a widget's version history");
         WidgetVersion v = library.version(id, version);
         JsonNode spec = library.spec(v);
         Map<String, Object> m = version(v, library.get(id).getVersion());
@@ -92,11 +93,11 @@ public class WidgetController {
         return m;
     }
 
-    /** Makes an older version current again, as the next version (approvers only). */
+    /** Makes an older version current again, as the next version (Reviewers only). */
     @PostMapping("/library/{id}/versions/{version}/restore")
     public Map<String, Object> restore(@PathVariable String id, @PathVariable int version,
-                                       @RequestHeader(value = Role.HEADER, required = false) String role) {
-        return summary(workflow.restore(id, version, Role.of(role)));
+                                       Actor actor) {
+        return summary(workflow.restore(id, version, actor));
     }
 
     /**
@@ -186,6 +187,7 @@ public class WidgetController {
         m.put("id", d.getId());
         m.put("version", d.getVersion());
         m.put("origin", d.getOrigin());
+        m.put("owner", d.getOwner());
         m.put("title", d.getTitle());
         m.put("description", d.getDescription());
         m.put("primitive", d.getPrimitive());

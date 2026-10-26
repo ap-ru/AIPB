@@ -91,11 +91,15 @@ class AssistantEvalLiveTest {
     }
 
     // ------------------------------------------------------------------ http
+    // the assistant is for roles that build widgets
+    private static final String ROLE = "X-AIPB-Role";
+    private static final String BUILDER = "builder";
+
     private List<String> message(String session, String text, Map<String, String> params) throws Exception {
         ObjectNode body = mapper.createObjectNode().put("text", text);
         body.set("params", mapper.valueToTree(params));
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE + "/api/assistant/sessions/" + session + "/messages"))
-                .timeout(Duration.ofMinutes(8)).header("Content-Type", "application/json").header("Accept", "text/event-stream")
+                .timeout(Duration.ofMinutes(8)).header("Content-Type", "application/json").header("Accept", "text/event-stream").header(ROLE, BUILDER)
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
         List<String> events = new ArrayList<>();
         try (Stream<String> lines = http.send(req, HttpResponse.BodyHandlers.ofLines()).body()) {
@@ -105,14 +109,14 @@ class AssistantEvalLiveTest {
     }
 
     private JsonNode get(String path) throws Exception {
-        HttpResponse<String> r = http.send(HttpRequest.newBuilder(URI.create(BASE + path)).timeout(Duration.ofSeconds(60)).GET().build(),
+        HttpResponse<String> r = http.send(HttpRequest.newBuilder(URI.create(BASE + path)).timeout(Duration.ofSeconds(60)).header(ROLE, BUILDER).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         return mapper.readTree(r.body());
     }
 
     private JsonNode post(String path, JsonNode body) throws Exception {
         HttpResponse<String> r = http.send(HttpRequest.newBuilder(URI.create(BASE + path)).timeout(Duration.ofSeconds(60))
-                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body.toString())).build(),
+                .header("Content-Type", "application/json").header(ROLE, BUILDER).POST(HttpRequest.BodyPublishers.ofString(body.toString())).build(),
                 HttpResponse.BodyHandlers.ofString());
         return mapper.readTree(r.body());
     }
@@ -128,7 +132,7 @@ class AssistantEvalLiveTest {
         long passed = results.stream().filter(CaseResult::pass).count();
         double cost = results.stream().mapToDouble(CaseResult::costUsd).sum();
         StringBuilder md = new StringBuilder("# Assistant evaluation\n\n")
-                .append("Model ").append(status.path("model").asText()).append(", effort ").append(status.path("effort")).append(". Client ").append(CLIENT).append(".\n\n")
+                .append("Model ").append(status.path("model")).append(", effort ").append(status.path("effort")).append(". Client ").append(CLIENT).append(".\n\n")
                 .append("**").append(passed).append(" / ").append(results.size()).append(" passed** · total cost $").append(String.format("%.2f", cost))
                 .append(" · ").append(String.format("%.0f", results.stream().mapToLong(CaseResult::ms).average().orElse(0) / 1000)).append(" s average\n\n")
                 .append("| case | request | result | proposal | cost | time |\n|---|---|---|---|---|---|\n");

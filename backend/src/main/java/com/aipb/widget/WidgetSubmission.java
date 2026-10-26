@@ -14,9 +14,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * A request to add a widget to the library or change one (aipb.widget_submissions). It waits for an approver, who
- * approves it (it becomes the widget's next version), sends it back with comments (the builder revises and
- * resubmits the same submission) or rejects it (final). Nothing in it reaches a page until it is approved.
+ * A request to add a widget to the library or change one (aipb.widget_submissions). It waits for a Reviewer, who
+ * approves it (it becomes the widget's next version), gives feedback to revise (the Builder revises and resubmits the
+ * same submission) or rejects it (final). Nothing in it reaches a page until it is approved.
  */
 @Data
 @NoArgsConstructor
@@ -43,13 +43,14 @@ public class WidgetSubmission {
     private String layoutId;
     private String pageId;           // the page it was built on: its parameters are the sample values
     private Map<String, String> params = new LinkedHashMap<>();
+    private String submittedBy;      // the actor (e.g. demo-builder): only they, or a Reviewer, can revise it
     private String submittedByRole;
     private Integer approvedVersion;
     private List<Event> history = new ArrayList<>();
     private Instant createdAt;
     private Instant updatedAt;
 
-    /** submitted | resubmitted | approved | sent_back | rejected */
+    /** submitted | resubmitted | approved | sent_back (feedback & revise) | rejected */
     @Data
     @NoArgsConstructor
     @AllArgsConstructor

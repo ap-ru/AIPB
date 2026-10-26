@@ -7,6 +7,7 @@ import com.aipb.semantic.SemanticModel;
 import com.aipb.semantic.SemanticModelValidator;
 import com.aipb.service.LayoutService;
 import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -59,7 +60,7 @@ class QuerySpecTest {
 
     private void returns(String rows) throws Exception {
         JsonNode r = mapper.readTree(rows);
-        when(source.aggregate(anyString(), any(ArrayNode.class))).thenReturn(new SourceData.Result(r, r.size(), r.size(), List.of()));
+        when(source.aggregate(anyString(), any(ArrayNode.class))).thenReturn(new SourceReader.Result(r, r.size(), r.size(), List.of()));
     }
 
     private static final String EXPOSURE = """

@@ -77,9 +77,9 @@ public class IntakeStage {
             if (s.getView() != null) sb.append("display: ").append(s.getView()).append('\n');
             sb.append("review: ").append(s.getReviewState()).append("\n</current_widget>\n");
         }
-        if (s.getApproverFeedback() != null) {
-            sb.append("<approver_feedback>\nAn approver sent this widget back. Revise it to address this, together with the banker's message:\n")
-                    .append(s.getApproverFeedback()).append("\n</approver_feedback>\n");
+        if (s.getReviewerFeedback() != null) {
+            sb.append("<reviewer_feedback>\nA Reviewer gave feedback to revise this widget. Revise it to address this, together with the banker's message:\n")
+                    .append(s.getReviewerFeedback()).append("\n</reviewer_feedback>\n");
         }
         // the turns before the latest message (which is the last turn)
         List<AssistantSession.Turn> turns = s.getTurns();
@@ -89,7 +89,7 @@ public class IntakeStage {
             sb.append("<conversation>\n");
             for (int i = from; i < end; i++) {
                 AssistantSession.Turn t = turns.get(i);
-                sb.append(switch (t.getRole()) { case "user" -> "Banker: "; case "approver" -> "Approver: "; default -> "Assistant: "; })
+                sb.append(switch (t.getRole()) { case "user" -> "Banker: "; case "reviewer" -> "Reviewer: "; default -> "Assistant: "; })
                         .append(t.getText()).append('\n');
             }
             sb.append("</conversation>\n");

@@ -1,7 +1,7 @@
 package com.aipb.assistant;
 
 import com.aipb.assistant.llm.LlmGateway;
-import com.aipb.widget.Role;
+import com.aipb.identity.Actor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +19,7 @@ import java.util.concurrent.Executors;
  * The widget assistant API. A message or a verify request returns a server-sent event stream (stage, activity,
  * message, proposal, error, done); the run keeps going and is saved if the client disconnects, and GET on the
  * session recovers its state. The runs endpoint is the inspector: what each stage was given and what it did.
+ * Only roles that can build widgets may use it, and a conversation belongs to the actor who started it.
  */
 @Slf4j
 @RestController
@@ -38,43 +39,53 @@ public class AssistantController {
     public record ApproveRequest(Boolean confirmUnverified) {}
 
     @GetMapping("/status")
-    public Map<String, Object> status() {
-        return Map.of("enabled", gateway.enabled(), "model", props.getModel(), "effort", props.getEffort());
+    public Map<String, Object> status(Actor actor) {
+        return Map.of("enabled", gateway.enabled(), "allowed", actor.role().canUseAssistant(), "model", props.getModel(), "effort", props.getEffort());
     }
 
     @PostMapping("/sessions")
-    public Map<String, Object> create(@RequestBody CreateRequest req) {
+    public Map<String, Object> create(@RequestBody CreateRequest req, Actor actor) {
+        actor.requireAuthor();
         if (req == null || req.pageId() == null) throw new IllegalArgumentException("pageId is required");
         if (req.modifies() != null && !req.modifies().isBlank())
-            return view(orchestrator.createModify(req.layoutId(), req.pageId(), req.params(), req.modifies()));
-        return view(orchestrator.create(req.layoutId(), req.pageId(), req.params()));
+            return view(orchestrator.createModify(req.layoutId(), req.pageId(), req.params(), req.modifies(), actor.id()));
+        return view(orchestrator.create(req.layoutId(), req.pageId(), req.params(), actor.id()));
     }
 
+    /** A conversation: its owner continues it; a Reviewer can read any, to see how a submitted widget was built. */
     @GetMapping("/sessions/{id}")
-    public Map<String, Object> get(@PathVariable String id) { return view(orchestrator.get(id)); }
+    public Map<String, Object> get(@PathVariable String id, Actor actor) {
+        return view(actor.role().canReview() ? orchestrator.get(id) : owned(id, actor));
+    }
 
     @PostMapping(value = "/sessions/{id}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter message(@PathVariable String id, @RequestBody MessageRequest req) {
-        orchestrator.get(id); // 404 before opening the stream
+    public SseEmitter message(@PathVariable String id, @RequestBody MessageRequest req, Actor actor) {
+        owned(id, actor); // 403/404 before opening the stream
         return stream(events -> orchestrator.message(id, req == null ? null : req.text(), req == null ? null : req.params(), events));
     }
 
     @PostMapping(value = "/sessions/{id}/verify", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter verify(@PathVariable String id) {
-        orchestrator.get(id);
+    public SseEmitter verify(@PathVariable String id, Actor actor) {
+        owned(id, actor);
         return stream(events -> orchestrator.verify(id, events));
     }
 
-    /** Sends the proposal for approval (an approver's is approved), or places a widget reused from the library. */
+    /** Sends the proposal for approval (a Reviewer's is approved), or places a widget reused from the library. */
     @PostMapping("/sessions/{id}/submit")
-    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) ApproveRequest req,
-                                      @RequestHeader(value = Role.HEADER, required = false) String role) {
-        return orchestrator.submit(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()), Role.of(role));
+    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) ApproveRequest req, Actor actor) {
+        owned(id, actor);
+        return orchestrator.submit(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()), actor);
     }
 
     /** The inspector: every stage run with its model, effort, tokens, cost, tool calls and context manifest. */
     @GetMapping("/sessions/{id}/runs")
-    public List<AssistantSession.StageRun> runs(@PathVariable String id) { return orchestrator.get(id).getRuns(); }
+    public List<AssistantSession.StageRun> runs(@PathVariable String id, Actor actor) {
+        return (actor.role().canReview() ? orchestrator.get(id) : owned(id, actor)).getRuns();
+    }
+
+    private AssistantSession owned(String id, Actor actor) {
+        return orchestrator.get(id, actor.requireAuthor().id());
+    }
 
     private interface Run { void run(AssistantEvents events); }
 
@@ -115,7 +126,8 @@ public class AssistantController {
         m.put("submissionId", s.getSubmissionId());
         m.put("approval", s.getApproval());
         m.put("approvedVersion", s.getApprovedVersion());
-        m.put("approverFeedback", s.getApproverFeedback());
+        m.put("reviewerFeedback", s.getReviewerFeedback());
+        m.put("owner", s.getOwner());
         m.put("modifies", s.getModifies());
         m.put("modifiesVersion", s.getModifiesVersion());
         m.put("modifiesTitle", s.getModifiesTitle());

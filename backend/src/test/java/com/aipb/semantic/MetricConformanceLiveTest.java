@@ -1,7 +1,9 @@
 package com.aipb.semantic;
 
-import com.aipb.source.McpClient;
+import com.aipb.source.DirectSource;
 import com.aipb.source.SourceData;
+import com.aipb.support.LiveSources;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -17,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 /**
- * Conformance of the semantic layer: every metric, run through the planner, the compiler and the real MCP server, must
+ * Conformance of the semantic layer: every metric, run through the planner, the compiler and the driver (as pages read), must
  * match figures computed independently - in plain Java over raw documents read with find (no aggregation, no shared
  * code with the compiler). Covers three clients, a client with no covenants (an edge case) and the whole book.
  * Needs the running stack: {@code mvn test -Dgroups=live -Dsurefire.excludedGroups=}
@@ -29,9 +31,10 @@ class MetricConformanceLiveTest {
     private static final Set<String> CLOSED = Set.of("Closed Won", "Closed Lost");
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SourceData source = new SourceData(
-            new McpClient(mapper, System.getProperty("aipb.mcp-url", "http://localhost:3001/mcp"), 30), "bank");
-    private final QueryExecutor executor = new QueryExecutor(SemanticModel.fromClasspath(mapper), source);
+    // the runtime path reads through the driver, as pages do; independent figures are computed from MCP reads
+    private final DirectSource direct = LiveSources.direct(mapper);
+    private final SourceData source = LiveSources.mcp(mapper);
+    private final QueryExecutor executor = new QueryExecutor(SemanticModel.fromClasspath(mapper), direct);
     private LocalDate asOf;
     private List<String> clients;
 
@@ -268,7 +271,7 @@ class MetricConformanceLiveTest {
     }
 
     private List<JsonNode> docs(String collection, Map<String, Object> filter) {
-        SourceData.Result r = source.find(collection, filter, null, null, 1000);
+        SourceReader.Result r = source.find(collection, filter, null, null, 1000);
         assertThat(r.truncated()).as("independent read of " + collection + " truncated").isFalse();
         List<JsonNode> out = new ArrayList<>();
         r.documents().forEach(out::add);

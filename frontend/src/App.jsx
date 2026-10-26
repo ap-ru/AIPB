@@ -5,17 +5,20 @@ import DynamicPage from './pages/DynamicPage.jsx';
 import Client360Page from './pages/Client360Page.jsx';
 import Icon from './components/Icon.jsx';
 
-/** Builder / Approver: who is acting in the maker-checker flow (a demo stand-in for sign-in). */
-function RoleToggle() {
-  const { role, setRole } = usePlatform();
+/** Demo role switcher: no sign-in yet, so whoever is at the screen picks who the app acts as. */
+function RolePicker() {
+  const { role, setRole, roles, can } = usePlatform();
+  if (!roles) return null;
   return (
-    <div className="role-toggle" role="radiogroup" aria-label="Acting as">
-      {[['builder', 'Builder', 'B'], ['approver', 'Approver', 'A']].map(([k, label, short]) => (
-        <button key={k} role="radio" aria-checked={role === k} className={role === k ? 'active' : ''} onClick={() => setRole(k)}
-          title={k === 'builder' ? 'Builder: your widgets go for approval' : 'Approver: approve widgets; yours are approved as you save them'}>
-          <span className="nav-label">{label}</span><span className="role-short" aria-hidden="true">{short}</span>
-        </button>
-      ))}
+    <div className="role-picker" title={can.description}>
+      <span className="role-initial" aria-hidden="true">{(can.label || role).charAt(0)}</span>
+      <label className="nav-label">
+        <span className="label">Viewing as</span>
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          {roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+      </label>
+      <div className="role-desc nav-label">{can.description}</div>
     </div>
   );
 }
@@ -42,15 +45,17 @@ function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-foot">
-        <div className="label nav-label" style={{ marginBottom: 6 }}>Acting as</div>
-        <RoleToggle />
+        <RolePicker />
         {layout && !error
           ? <div className="row" title="Connected"><span className="dot" /> <span className="nav-label">CONNECTED</span></div>
           : <div className="row"><span className="dot" style={{ background: 'var(--red)' }} /> <span className="nav-label">{error ? 'API UNREACHABLE' : 'CONNECTING…'}</span></div>}
         {source && (
-          <div className="row" style={{ marginTop: 6 }} title={source.connected ? `${source.server} · ${source.mcpUrl}` : source.error}>
+          <div className="row" style={{ marginTop: 6 }}
+            title={source.connected
+              ? `Pages: MongoDB, read directly · Assistant: ${source.mcp?.connected ? `${source.mcp.server} · ${source.mcp.url}` : 'MCP server unreachable'}`
+              : source.error}>
             <span className="dot" style={source.connected ? undefined : { background: 'var(--red)' }} />
-            <span className="nav-label">{source.connected ? `SOURCE · MCP · ${source.database} · ${source.collections.length} collections` : 'SOURCE UNREACHABLE'}</span>
+            <span className="nav-label">{source.connected ? `SOURCE · ${source.database} · ${source.collections.length} collections` : 'SOURCE UNREACHABLE'}</span>
           </div>
         )}
       </div>

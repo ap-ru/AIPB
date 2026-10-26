@@ -2,8 +2,8 @@ package com.aipb.widget;
 
 import com.aipb.semantic.QueryExecutor;
 import com.aipb.semantic.SemanticModel;
-import com.aipb.source.McpClient;
-import com.aipb.source.SourceData;
+import com.aipb.source.DirectSource;
+import com.aipb.support.LiveSources;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DynamicTest;
@@ -31,10 +31,10 @@ import static org.assertj.core.api.Assertions.within;
 class StarterParityLiveTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SourceData source = new SourceData(
-            new McpClient(mapper, System.getProperty("aipb.mcp-url", "http://localhost:3001/mcp"), 30), "bank");
-    private final WidgetDataService data = new WidgetDataService(source, null, mapper,
-            new QueryExecutor(SemanticModel.fromClasspath(mapper), source));
+    // read through the driver, as pages do
+    private final DirectSource direct = LiveSources.direct(mapper);
+    private final WidgetDataService data = new WidgetDataService(direct, null, mapper,
+            new QueryExecutor(SemanticModel.fromClasspath(mapper), direct));
 
     private static final List<String> IDS = List.of("client-revenue-ytd", "client-exposure", "client-deposits", "client-open-pipeline",
             "client-revenue-trend", "client-revenue-by-lob", "client-holdings", "client-covenants", "client-open-opportunities",
@@ -43,7 +43,7 @@ class StarterParityLiveTest {
     @TestFactory
     Stream<DynamicTest> startersMatchTheHandWrittenPipelinesForEveryClient() throws Exception {
         List<String> clients = new ArrayList<>();
-        source.find("clients", null, Map.of("clientId", 1), Map.of("clientId", 1), 1000).documents().forEach(c -> clients.add(c.get("clientId").asText()));
+        direct.find("clients", null, Map.of("clientId", 1), Map.of("clientId", 1), 1000).documents().forEach(c -> clients.add(c.get("clientId").asText()));
         assertThat(clients).hasSizeGreaterThan(10);
         List<DynamicTest> tests = new ArrayList<>();
         for (String id : IDS) {

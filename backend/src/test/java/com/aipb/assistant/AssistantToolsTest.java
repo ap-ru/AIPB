@@ -5,6 +5,7 @@ import com.aipb.assistant.gates.PresentGate;
 import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
 import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.aipb.widget.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,10 +47,10 @@ class AssistantToolsTest {
 
     private JsonNode json(String s) throws Exception { return mapper.readTree(s); }
 
-    private SourceData.Result rows(int n) {
+    private SourceReader.Result rows(int n) {
         ArrayNode a = mapper.createArrayNode();
         for (int i = 0; i < n; i++) a.addObject().put("i", i).put("note", "x".repeat(300)).set("tags", mapper.valueToTree(List.of(1, 2, 3, 4, 5, 6, 7)));
-        return new SourceData.Result(a, n, n, List.of());
+        return new SourceReader.Result(a, n, n, List.of());
     }
 
     @Test
@@ -92,7 +93,7 @@ class AssistantToolsTest {
         verify(source).find(eq("holdings"), isNull(), argThat(p -> p.keySet().equals(Set.of("productName", "drawnUsd"))), isNull(), eq(AssistantTools.MAX_SAMPLE));
         assertThat(tools.sampleDocuments(json("{\"collection\":\"holdings\",\"fields\":[\"bad field!\"]}"), ctx).isError()).isTrue();
 
-        when(source.aggregate(anyString(), any(ArrayNode.class))).thenReturn(new SourceData.Result(json("[{\"_id\":\"Closing\",\"count\":17},{\"_id\":\"Discovery\",\"count\":84}]"), 2, 2, List.of()));
+        when(source.aggregate(anyString(), any(ArrayNode.class))).thenReturn(new SourceReader.Result(json("[{\"_id\":\"Closing\",\"count\":17},{\"_id\":\"Discovery\",\"count\":84}]"), 2, 2, List.of()));
         AssistantTools.Outcome d = tools.distinctValues(json("{\"collection\":\"opportunities\",\"field\":\"stage\"}"), ctx);
         assertThat(json(d.content()).path("values").toString()).contains("Closing").contains("84");
         ArgumentCaptor<ArrayNode> sent = ArgumentCaptor.forClass(ArrayNode.class);

@@ -3,8 +3,10 @@ package com.aipb.context;
 import com.aipb.seed.Defaults;
 import com.aipb.semantic.QueryExecutor;
 import com.aipb.semantic.SemanticModel;
-import com.aipb.source.McpClient;
+import com.aipb.source.DirectSource;
 import com.aipb.source.SourceData;
+import com.aipb.support.LiveSources;
+import com.aipb.source.SourceReader;
 import com.aipb.widget.SpecMigrator;
 import com.aipb.widget.WidgetDataService;
 import com.aipb.widget.WidgetSpec;
@@ -30,11 +32,12 @@ import static org.assertj.core.api.Assertions.within;
 class PageContextLiveTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SourceData source = new SourceData(
-            new McpClient(mapper, System.getProperty("aipb.mcp-url", "http://localhost:3001/mcp"), 30), "bank");
+    // the runtime path reads through the driver, as pages do; independent figures are computed from MCP reads
+    private final DirectSource direct = LiveSources.direct(mapper);
+    private final SourceData source = LiveSources.mcp(mapper);
     private final SemanticModel sm = SemanticModel.fromClasspath(mapper);
-    private final ContextResolver resolver = new ContextResolver(sm, source);
-    private final WidgetDataService data = new WidgetDataService(source, null, mapper, new QueryExecutor(sm, source));
+    private final ContextResolver resolver = new ContextResolver(sm, direct);
+    private final WidgetDataService data = new WidgetDataService(direct, null, mapper, new QueryExecutor(sm, direct));
     private final LocalDate asOf = LocalDate.ofInstant(Instant.parse(source.asOfDate()), ZoneOffset.UTC);
 
     private WidgetSpec starter(String id) throws Exception {
@@ -93,7 +96,7 @@ class PageContextLiveTest {
     }
 
     private List<JsonNode> docs(String collection, Map<String, Object> filter) {
-        SourceData.Result r = source.find(collection, filter, null, null, 1000);
+        SourceReader.Result r = source.find(collection, filter, null, null, 1000);
         assertThat(r.truncated()).isFalse();
         List<JsonNode> out = new ArrayList<>();
         r.documents().forEach(out::add);

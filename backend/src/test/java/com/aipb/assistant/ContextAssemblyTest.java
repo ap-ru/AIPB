@@ -47,7 +47,8 @@ class ContextAssemblyTest {
         LayoutService layouts = mock(LayoutService.class);
         when(layouts.get(anyString())).thenReturn(Defaults.defaultLayout());
         WidgetDefinitionRepository library = mock(WidgetDefinitionRepository.class);
-        when(library.findAll()).thenReturn(starterDefinitions());
+        List<WidgetDefinition> defs = starterDefinitions();
+        when(library.findAll()).thenReturn(defs);
         WidgetDataService widgetData = mock(WidgetDataService.class);
         when(widgetData.options(any())).thenReturn(List.of(Map.of("value", "CL-0002", "label", "Northstar Communities")));
         context = new ContextAssembler(source, new WidgetPrimitives(mapper), library, widgetData, layouts, mapper);
