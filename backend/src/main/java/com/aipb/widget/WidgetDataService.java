@@ -4,7 +4,7 @@ import com.aipb.context.ContextResolver;
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
 import com.aipb.semantic.*;
-import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,7 +29,7 @@ import java.util.*;
 @Service
 public class WidgetDataService {
 
-    private final SourceData source;
+    private final SourceReader source;
     private final WidgetDefinitionRepository definitions;
     private final ObjectMapper mapper;
     private final QueryExecutor executor;
@@ -37,7 +37,7 @@ public class WidgetDataService {
     private final LayoutService layouts;
 
     @Autowired
-    public WidgetDataService(SourceData source, WidgetDefinitionRepository definitions, ObjectMapper mapper, QueryExecutor executor,
+    public WidgetDataService(SourceReader source, WidgetDefinitionRepository definitions, ObjectMapper mapper, QueryExecutor executor,
                              ContextResolver contexts, LayoutService layouts) {
         this.source = source;
         this.definitions = definitions;
@@ -48,7 +48,7 @@ public class WidgetDataService {
     }
 
     /** Without page layouts: for tools and tests that run specs outside a page. */
-    public WidgetDataService(SourceData source, WidgetDefinitionRepository definitions, ObjectMapper mapper, QueryExecutor executor) {
+    public WidgetDataService(SourceReader source, WidgetDefinitionRepository definitions, ObjectMapper mapper, QueryExecutor executor) {
         this(source, definitions, mapper, executor, new ContextResolver(executor.model(), source), null);
     }
 
@@ -101,7 +101,7 @@ public class WidgetDataService {
         if (blankToNull(asOfDate) != null) params.put(ParamBinder.AS_OF_DATE, asOfDate);
         ParamBinder.Bound bound = ParamBinder.bind(spec, params, source::asOfDate);
         // sent as a JSON tree: converting to Maps would drop nulls such as {"$group": {"_id": null}}
-        SourceData.Result r = source.aggregate(spec.custom().collection(), (ArrayNode) bound.pipeline());
+        SourceReader.Result r = source.aggregate(spec.custom().collection(), (ArrayNode) bound.pipeline());
         List<String> notes = new ArrayList<>();
         if (ctx.period() != null || !ctx.filters().isEmpty())
             notes.add("This widget's query is hand-written, so it does not follow the page's period or filters.");

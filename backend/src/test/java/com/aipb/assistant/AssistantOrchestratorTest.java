@@ -8,6 +8,7 @@ import com.aipb.assistant.stages.*;
 import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
 import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.aipb.widget.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -290,9 +291,9 @@ class AssistantOrchestratorTest {
         return new ValidationReport(false, List.of(new ValidationReport.Issue(code, "data.pipeline", message)), List.of(), Map.of(), null);
     }
 
-    private SourceData.Result result(String rows) {
+    private SourceReader.Result result(String rows) {
         JsonNode r = readUnchecked(rows);
-        return new SourceData.Result(r, r.size(), r.size(), List.of());
+        return new SourceReader.Result(r, r.size(), r.size(), List.of());
     }
 
     private WidgetSpec spec() {

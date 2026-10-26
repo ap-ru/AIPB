@@ -6,23 +6,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.regex.Pattern;
 
 /**
- * The app's only gateway to the source data, through the MongoDB MCP server. Every call is pinned to the configured
- * source database, so nothing in the app (and later no assistant tool call) can read another database through it.
- *
- * <p>Two callers are planned: widgets reading their data at render time ({@link #aggregate}, {@link #find}), and the
- * assistant learning what data exists before it designs a widget ({@link #catalog}, {@link #collections},
- * {@link #schema}, plus samples via {@link #find}). Results are plain JSON (see {@link Ejson}); a result cut short by a
- * server limit is marked {@code truncated} so it is never shown as if it were complete.
+ * The source data through the MongoDB MCP server, for the assistant learning what data exists before it designs a
+ * widget ({@link #catalog}, {@link #collections}, {@link #schema}, samples and test queries via {@link #find} and
+ * {@link #aggregate}). Pages read their data with {@link DirectSource} instead, never through MCP. Every call is pinned
+ * to the configured source database, so no assistant tool call can read another database through it. Results are plain
+ * JSON (see {@link Ejson}); a result cut short by a server limit is marked {@code truncated}.
  */
 @Service
-public class SourceData {
+public class SourceData implements SourceReader {
 
     /** The MCP server's connection to the database named in its configured connection string. */
     static final String CONNECTION = "preconfigured";
-    private static final Pattern COLLECTION = Pattern.compile("[A-Za-z_][A-Za-z0-9_.-]{0,119}");
 
     private static final long CACHE_MS = 60_000;
 
@@ -40,35 +36,25 @@ public class SourceData {
         this.database = database;
     }
 
-    /**
-     * Documents returned by a query. {@code total} is how many matched (null if the server did not say);
-     * {@code limits} names the server limits that cut the result short, if any.
-     */
-    public record Result(JsonNode documents, int count, Integer total, List<String> limits) {
-        public boolean truncated() { return !limits.isEmpty(); }
-    }
-
+    @Override
     public String database() { return database; }
 
-    /** Runs an aggregation pipeline on a source collection. Write stages are refused by the read-only server. */
+    /** Write stages are refused by the read-only server. */
+    @Override
     public Result aggregate(String collection, List<?> pipeline) {
         Map<String, Object> args = args(collection);
         args.put("pipeline", pipeline == null ? List.of() : pipeline);
         return result(mcp.callTool("aggregate", args));
     }
 
-    /**
-     * As {@link #aggregate(String, List)}, for a pipeline already in JSON form. Prefer this for stored specs: a JSON
-     * tree is sent as-is, nulls included (e.g. {"$group": {"_id": null}}), whereas Maps lose null values to the app's
-     * non-null JSON setting.
-     */
+    @Override
     public Result aggregate(String collection, ArrayNode pipeline) {
         Map<String, Object> args = args(collection);
         args.put("pipeline", pipeline);
         return result(mcp.callTool("aggregate", args));
     }
 
-    /** Finds documents in a source collection. Any argument but the collection may be null. */
+    @Override
     public Result find(String collection, Map<String, Object> filter, Map<String, Object> projection,
                        Map<String, Object> sort, Integer limit) {
         Map<String, Object> args = args(collection);
@@ -79,7 +65,8 @@ public class SourceData {
         return result(mcp.callTool("find", args));
     }
 
-    /** The dataset's "today" (_meta.asOfDate) as an ISO instant; cached for a minute. Every widget's time logic uses it. */
+    /** Cached for a minute. */
+    @Override
     public String asOfDate() {
         Cached<String> c = asOfDate;
         if (c != null && c.fresh()) return c.value();
@@ -125,12 +112,10 @@ public class SourceData {
 
     // ------------------------------------------------------------------ helpers
     private Map<String, Object> args(String collection) {
-        if (collection == null || !COLLECTION.matcher(collection).matches() || collection.startsWith("system."))
-            throw new IllegalArgumentException("invalid collection name '" + collection + "'");
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("connectionId", CONNECTION);
         args.put("database", database);
-        args.put("collection", collection);
+        args.put("collection", SourceReader.collection(collection));
         return args;
     }
 

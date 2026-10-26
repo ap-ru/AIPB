@@ -41,8 +41,8 @@ services:
       mongo:
         condition: service_healthy
 
-  # MongoDB MCP server: the single, read-only gateway to the `bank` source data. Used by the backend (widget data at
-  # runtime, and the assistant exploring data while it designs a widget) and by Claude Code via .mcp.json.
+  # MongoDB MCP server: read-only access to the `bank` source data for the assistant exploring data while it designs a
+  # widget, and for Claude Code via .mcp.json. Pages do not use it: the backend reads widget data with the driver.
   mcp:
     image: mongodb/mongodb-mcp-server:3.0.5
     container_name: aipb-mcp
@@ -86,8 +86,10 @@ services:
       AIPB_SEED: "true"
       AIPB_RESET: ${AIPB_RESET:-false}
       AIPB_CORS: http://localhost:3080,http://localhost:5173
-      AIPB_MCP_URL: http://mcp:3000/mcp
+      # Pages read the source data directly, as bank_reader (read-only on `bank`); the assistant goes through MCP.
+      AIPB_SOURCE_URI: mongodb://bank_reader:${BANK_READER_PASSWORD}@mongo:27017/bank?authSource=bank
       AIPB_SOURCE_DB: bank
+      AIPB_MCP_URL: http://mcp:3000/mcp
       # The widget assistant: enabled when ANTHROPIC_API_KEY is set. Model and per-stage effort (low|medium|high|xhigh|max).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AIPB_ASSISTANT_MODEL: ${AIPB_ASSISTANT_MODEL:-claude-opus-5-5}

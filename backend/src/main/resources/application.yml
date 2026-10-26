@@ -22,9 +22,14 @@ aipb:
     enabled: ${AIPB_SEED:true}
     reset-on-start: ${AIPB_RESET:false}
   source:
-    # Source data (MongoDB) is read only through the MongoDB MCP server; every call is pinned to this database.
-    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp}
+    # Source data (MongoDB), always pinned to this database and read-only. Pages read it with the driver (uri, as
+    # bank_reader); the assistant explores it through the MongoDB MCP server (mcp-url).
+    uri: ${AIPB_SOURCE_URI:mongodb://localhost:27017/bank}
     database: ${AIPB_SOURCE_DB:bank}
+    # the same caps the MCP server applies
+    max-documents: 1000
+    max-time-ms: 10000
+    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp}
     timeout-seconds: ${AIPB_MCP_TIMEOUT:20}
   assistant:
     # The widget assistant (com.aipb.assistant). Disabled when no API key is set.

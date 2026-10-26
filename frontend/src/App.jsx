@@ -31,9 +31,12 @@ function Sidebar() {
           ? <div className="row" title="Connected"><span className="dot" /> <span className="nav-label">CONNECTED</span></div>
           : <div className="row"><span className="dot" style={{ background: 'var(--red)' }} /> <span className="nav-label">{error ? 'API UNREACHABLE' : 'CONNECTING…'}</span></div>}
         {source && (
-          <div className="row" style={{ marginTop: 6 }} title={source.connected ? `${source.server} · ${source.mcpUrl}` : source.error}>
+          <div className="row" style={{ marginTop: 6 }}
+            title={source.connected
+              ? `Pages: MongoDB, read directly · Assistant: ${source.mcp?.connected ? `${source.mcp.server} · ${source.mcp.url}` : 'MCP server unreachable'}`
+              : source.error}>
             <span className="dot" style={source.connected ? undefined : { background: 'var(--red)' }} />
-            <span className="nav-label">{source.connected ? `SOURCE · MCP · ${source.database} · ${source.collections.length} collections` : 'SOURCE UNREACHABLE'}</span>
+            <span className="nav-label">{source.connected ? `SOURCE · ${source.database} · ${source.collections.length} collections` : 'SOURCE UNREACHABLE'}</span>
           </div>
         )}
       </div>

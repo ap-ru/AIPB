@@ -3,6 +3,7 @@ package com.aipb.widget;
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
 import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -67,7 +68,7 @@ class WidgetSpecValidatorTest {
     private void returns(String rowsJson, String... limits) throws Exception {
         JsonNode rows = mapper.readTree(rowsJson);
         when(source.aggregate(anyString(), any(ArrayNode.class)))
-                .thenReturn(new SourceData.Result(rows, rows.size(), rows.size(), List.of(limits)));
+                .thenReturn(new SourceReader.Result(rows, rows.size(), rows.size(), List.of(limits)));
     }
 
     private static final String GOOD_ROWS = """
@@ -225,7 +226,7 @@ class WidgetSpecValidatorTest {
         p.setValueField("clientId");
         p.setLabelField("name");
         when(source.find(eq("clients"), any(), any(), any(), any()))
-                .thenReturn(new SourceData.Result(mapper.readTree("[{\"clientId\":\"CL-0007\",\"name\":\"Acme\"}]"), 1, 1, List.of()));
+                .thenReturn(new SourceReader.Result(mapper.readTree("[{\"clientId\":\"CL-0007\",\"name\":\"Acme\"}]"), 1, 1, List.of()));
         returns(GOOD_ROWS);
         ValidationReport r = validator.validate(spec(), "default", "client", null);
         assertThat(r.ok()).isTrue();

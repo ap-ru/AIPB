@@ -1,5 +1,6 @@
 package com.aipb.web;
 
+import com.aipb.source.DirectSource;
 import com.aipb.source.McpClient;
 import com.aipb.source.SourceData;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,36 +14,49 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** The source-data connection (MongoDB through the MCP server). */
+/** The source-data connections: MongoDB read directly (what pages show), and the MCP server (what the assistant uses). */
 @RestController
 @RequestMapping("/api/source")
 @RequiredArgsConstructor
 public class SourceController {
 
+    private final DirectSource direct;
     private final McpClient mcp;
     private final SourceData source;
 
-    /** Whether the MCP server is reachable, and what it exposes. Never fails: an outage is reported, not thrown. */
+    /**
+     * Whether each connection works, and what it sees. {@code connected} is the direct one, since pages depend on it.
+     * Never fails: an outage is reported, not thrown.
+     */
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("mcpUrl", mcp.url().toString());
-        m.put("database", source.database());
+        m.put("database", direct.database());
         try {
-            JsonNode server = mcp.serverInfo();
-            List<String> tools = new ArrayList<>();
-            mcp.listTools().forEach(t -> tools.add(t.path("name").asText()));
-            JsonNode meta = source.meta();
+            JsonNode meta = direct.find("_meta", null, null, null, 1).documents();
             m.put("connected", true);
-            m.put("server", server.path("name").asText() + " " + server.path("version").asText());
-            m.put("tools", tools);
-            m.put("collections", source.collections());
-            m.put("catalogEntries", source.catalog().size());
-            if (meta != null) m.put("asOfDate", meta.path("asOfDate").asText());
+            m.put("collections", direct.collections());
+            m.put("catalogEntries", direct.find("_catalog", null, Map.of("_id", 1), null, null).count());
+            if (!meta.isEmpty()) m.put("asOfDate", meta.get(0).path("asOfDate").asText());
         } catch (RuntimeException e) {
             m.put("connected", false);
             m.put("error", String.valueOf(e.getMessage()));
         }
+        Map<String, Object> s = new LinkedHashMap<>();
+        s.put("url", mcp.url().toString());
+        try {
+            JsonNode server = mcp.serverInfo();
+            List<String> tools = new ArrayList<>();
+            mcp.listTools().forEach(t -> tools.add(t.path("name").asText()));
+            s.put("connected", true);
+            s.put("server", server.path("name").asText() + " " + server.path("version").asText());
+            s.put("tools", tools);
+            s.put("database", source.database());
+        } catch (RuntimeException e) {
+            s.put("connected", false);
+            s.put("error", String.valueOf(e.getMessage()));
+        }
+        m.put("mcp", s);
         return m;
     }
 }

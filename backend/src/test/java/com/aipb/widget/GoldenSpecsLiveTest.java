@@ -2,8 +2,10 @@ package com.aipb.widget;
 
 import com.aipb.semantic.QueryExecutor;
 import com.aipb.semantic.SemanticModel;
-import com.aipb.source.McpClient;
+import com.aipb.source.DirectSource;
 import com.aipb.source.SourceData;
+import com.aipb.support.LiveSources;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DynamicTest;
@@ -20,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 /**
- * The golden set: every starter spec, run through the real MCP server, must match figures computed independently -
+ * The golden set: every starter spec, run through the driver as pages read it, must match figures computed independently -
  * in plain Java over raw documents read with find (no aggregation). Needs the running stack:
  * <pre>docker compose up -d   then   mvn test -Dgroups=live -Dsurefire.excludedGroups=</pre>
  * The cases' natural-language requests (golden/cases.json) are what the assistant will later be evaluated on.
@@ -32,9 +34,10 @@ class GoldenSpecsLiveTest {
     private static final Set<String> CLOSED = Set.of("Closed Won", "Closed Lost");
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SourceData source = new SourceData(
-            new McpClient(mapper, System.getProperty("aipb.mcp-url", "http://localhost:3001/mcp"), 30), "bank");
-    private final WidgetDataService data = new WidgetDataService(source, null, mapper, new QueryExecutor(SemanticModel.fromClasspath(mapper), source));
+    // the runtime path reads through the driver, as pages do; independent figures are computed from MCP reads
+    private final DirectSource direct = LiveSources.direct(mapper);
+    private final SourceData source = LiveSources.mcp(mapper);
+    private final WidgetDataService data = new WidgetDataService(direct, null, mapper, new QueryExecutor(SemanticModel.fromClasspath(mapper), direct));
     private LocalDate asOf;
 
     @TestFactory
@@ -178,7 +181,7 @@ class GoldenSpecsLiveTest {
 
     // ------------------------------------------------------------------ helpers
     private List<JsonNode> docs(String collection, Map<String, Object> filter) {
-        SourceData.Result r = source.find(collection, filter, null, null, 1000);
+        SourceReader.Result r = source.find(collection, filter, null, null, 1000);
         assertThat(r.truncated()).as("golden read of " + collection + " truncated").isFalse();
         List<JsonNode> out = new ArrayList<>();
         r.documents().forEach(out::add);
