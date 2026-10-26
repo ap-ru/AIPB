@@ -290,7 +290,7 @@ Build and Review use read-only tools. All of them go through `SourceData`, so th
 
 ### Model, cost, limits
 
-- **Model:** `claude-opus-5-5` through the official Java SDK ([AnthropicGateway](backend/src/main/java/com/aipb/assistant/llm/AnthropicGateway.java)).
+- **Model:** per stage - `claude-haiku-5-5` for intake and present, `claude-sonnet-5-5` for build and review (`AIPB_MODEL_<STAGE>`) - through the official Java SDK ([AnthropicGateway](backend/src/main/java/com/aipb/assistant/llm/AnthropicGateway.java)).
 - **Request settings:** adaptive thinking; effort per stage (`AIPB_EFFORT_*`, default medium); prompt caching; server-side refusal fallbacks (`fallbacks: "default"`).
 - **Expected cost:** about **$0.35–0.45 per widget** at medium effort. The session's running cost is shown in the drawer.
 - **Caps** (`aipb.assistant.*`): 16 tool calls and 4 submissions per stage, 3 design attempts, 6 minutes per run. When a cap is hit, the assistant says what it couldn't finish.

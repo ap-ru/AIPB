@@ -32,6 +32,8 @@ public class AssistantSession {
     @Id
     private String id;
     private String layoutId;
+    /** The actor who started the conversation; only they can continue it, and what it saves goes to their personal library. */
+    private String owner;
     private String pageId;
     /** The page's parameter values when the latest message was sent (e.g. the selected clientId) - the sample values. */
     private Map<String, String> params = new LinkedHashMap<>();
@@ -49,6 +51,7 @@ public class AssistantSession {
 
     private List<StageRun> runs = new ArrayList<>();
     private String placedDefinitionId;
+    private String submission = "none"; // none | pending: the placed widget was submitted to the global library for review
     private Instant createdAt;
     private Instant updatedAt;
 

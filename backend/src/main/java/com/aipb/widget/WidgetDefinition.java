@@ -27,6 +27,28 @@ public class WidgetDefinition {
     private List<String> params;
     private String author;       // "starter" | "workbench" | later "assistant"
     private String spec;         // the WidgetSpec JSON, as saved
+    private String owner;        // actor id; "system" for starters
+    private String scope;        // personal | global (null: global - saved before roles existed)
+    private Review review;       // the request to publish a personal widget to the global library
     private Instant createdAt;
     private Instant updatedAt;
+
+    public static final String PERSONAL = "personal";
+    public static final String GLOBAL = "global";
+
+    public boolean global() { return scope == null || GLOBAL.equals(scope); }
+
+    /** Global definitions are visible to everyone; personal ones only to their owner. */
+    public boolean visibleTo(String actorId) { return global() || (owner != null && owner.equals(actorId)); }
+
+    public String reviewStatus() { return review == null || review.getStatus() == null ? "none" : review.getStatus(); }
+
+    @Data
+    @NoArgsConstructor
+    public static class Review {
+        private String status;       // none | pending | approved | rejected
+        private String submittedBy;
+        private Instant submittedAt;
+        private String note;
+    }
 }

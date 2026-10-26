@@ -5,6 +5,24 @@ import DynamicPage from './pages/DynamicPage.jsx';
 import Client360Page from './pages/Client360Page.jsx';
 import Icon from './components/Icon.jsx';
 
+/** Demo role switcher: no sign-in yet, so whoever is at the screen picks who the app acts as. */
+function RolePicker() {
+  const { role, setRole, roles, can } = usePlatform();
+  if (!roles) return null;
+  return (
+    <div className="role-picker" title={can.description}>
+      <span className="role-initial" aria-hidden="true">{(can.label || role).charAt(0)}</span>
+      <label className="nav-label">
+        <span className="label">Viewing as</span>
+        <select value={role} onChange={(e) => setRole(e.target.value)}>
+          {roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+      </label>
+      <div className="role-desc nav-label">{can.description}</div>
+    </div>
+  );
+}
+
 function Sidebar() {
   const { layout, error, source, assistantOpen } = usePlatform();
   const [logoOk, setLogoOk] = useState(true);
@@ -27,6 +45,7 @@ function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-foot">
+        <RolePicker />
         {layout && !error
           ? <div className="row" title="Connected"><span className="dot" /> <span className="nav-label">CONNECTED</span></div>
           : <div className="row"><span className="dot" style={{ background: 'var(--red)' }} /> <span className="nav-label">{error ? 'API UNREACHABLE' : 'CONNECTING…'}</span></div>}

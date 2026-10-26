@@ -1,9 +1,14 @@
 const BASE = import.meta.env.VITE_API_BASE || '';
 
+// The role every request is made as (no sign-in yet: chosen from the sidebar's role dropdown; see platform.jsx).
+let currentRole = 'banker';
+export function setApiRole(role) { currentRole = role; }
+const roleHeader = () => ({ 'X-AIPB-Role': currentRole });
+
 async function request(method, path, body) {
   const res = await fetch(BASE + path, {
     method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: body !== undefined ? { 'Content-Type': 'application/json', ...roleHeader() } : roleHeader(),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -38,7 +43,7 @@ export const api = {
 export async function stream(path, body, onEvent) {
   const res = await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...roleHeader() },
     body: JSON.stringify(body),
   });
   if (!res.ok || !res.body) throw new Error(res.status + ' ' + res.statusText);

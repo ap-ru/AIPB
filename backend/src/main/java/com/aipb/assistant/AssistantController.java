@@ -1,6 +1,7 @@
 package com.aipb.assistant;
 
 import com.aipb.assistant.llm.LlmGateway;
+import com.aipb.identity.Actor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,7 @@ import java.util.concurrent.Executors;
  * The widget assistant API. A message or a verify request returns a server-sent event stream (stage, activity,
  * message, proposal, error, done); the run keeps going and is saved if the client disconnects, and GET on the
  * session recovers its state. The runs endpoint is the inspector: what each stage was given and what it did.
+ * Only roles that can build widgets may use it, and a conversation belongs to the actor who started it.
  */
 @Slf4j
 @RestController
@@ -34,41 +36,55 @@ public class AssistantController {
     public record CreateRequest(String layoutId, String pageId, Map<String, String> params) {}
     public record MessageRequest(String text, Map<String, String> params) {}
     public record ApproveRequest(Boolean confirmUnverified) {}
+    public record SubmitRequest(String note) {}
 
     @GetMapping("/status")
-    public Map<String, Object> status() {
-        return Map.of("enabled", gateway.enabled(), "model", props.getModel(), "effort", props.getEffort());
+    public Map<String, Object> status(Actor actor) {
+        return Map.of("enabled", gateway.enabled(), "allowed", actor.role().canUseAssistant(), "model", props.getModel(), "effort", props.getEffort());
     }
 
     @PostMapping("/sessions")
-    public Map<String, Object> create(@RequestBody CreateRequest req) {
+    public Map<String, Object> create(@RequestBody CreateRequest req, Actor actor) {
+        actor.requireAuthor();
         if (req == null || req.pageId() == null) throw new IllegalArgumentException("pageId is required");
-        return view(orchestrator.create(req.layoutId(), req.pageId(), req.params()));
+        return view(orchestrator.create(req.layoutId(), req.pageId(), req.params(), actor.id()));
     }
 
     @GetMapping("/sessions/{id}")
-    public Map<String, Object> get(@PathVariable String id) { return view(orchestrator.get(id)); }
+    public Map<String, Object> get(@PathVariable String id, Actor actor) { return view(owned(id, actor)); }
 
     @PostMapping(value = "/sessions/{id}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter message(@PathVariable String id, @RequestBody MessageRequest req) {
-        orchestrator.get(id); // 404 before opening the stream
+    public SseEmitter message(@PathVariable String id, @RequestBody MessageRequest req, Actor actor) {
+        owned(id, actor); // 403/404 before opening the stream
         return stream(events -> orchestrator.message(id, req == null ? null : req.text(), req == null ? null : req.params(), events));
     }
 
     @PostMapping(value = "/sessions/{id}/verify", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter verify(@PathVariable String id) {
-        orchestrator.get(id);
+    public SseEmitter verify(@PathVariable String id, Actor actor) {
+        owned(id, actor);
         return stream(events -> orchestrator.verify(id, events));
     }
 
     @PostMapping("/sessions/{id}/approve")
-    public Map<String, Object> approve(@PathVariable String id, @RequestBody(required = false) ApproveRequest req) {
+    public Map<String, Object> approve(@PathVariable String id, @RequestBody(required = false) ApproveRequest req, Actor actor) {
+        owned(id, actor);
         return orchestrator.approve(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()));
+    }
+
+    /** Submits the widget the conversation added to the global library, for a Reviewer to approve. */
+    @PostMapping("/sessions/{id}/submit")
+    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) SubmitRequest req, Actor actor) {
+        owned(id, actor);
+        return orchestrator.submit(id, req == null ? null : req.note());
     }
 
     /** The inspector: every stage run with its model, effort, tokens, cost, tool calls and context manifest. */
     @GetMapping("/sessions/{id}/runs")
-    public List<AssistantSession.StageRun> runs(@PathVariable String id) { return orchestrator.get(id).getRuns(); }
+    public List<AssistantSession.StageRun> runs(@PathVariable String id, Actor actor) { return owned(id, actor).getRuns(); }
+
+    private AssistantSession owned(String id, Actor actor) {
+        return orchestrator.get(id, actor.requireAuthor().id());
+    }
 
     private interface Run { void run(AssistantEvents events); }
 
@@ -106,6 +122,7 @@ public class AssistantController {
         m.put("turns", s.getTurns());
         m.put("proposal", json(s.getProposal()));
         m.put("placedDefinitionId", s.getPlacedDefinitionId());
+        m.put("submission", s.getSubmission() == null ? "none" : s.getSubmission());
         double cost = s.getRuns().stream().mapToDouble(r -> r.getCostUsd() == null ? 0 : r.getCostUsd()).sum();
         m.put("costUsd", Math.round(cost * 10000) / 10000.0);
         return m;

@@ -84,6 +84,13 @@ button { font-family: inherit; }
 .nav a.active { background: var(--brand-tint); color: var(--brand-deep); border-left-color: var(--brand); border-radius: 0 6px 6px 0; }
 .nav a .tag { margin-left: auto; }
 .sidebar-foot { padding: 12px 18px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); background: var(--panel-2); }
+/* demo role switcher (no sign-in yet) */
+.role-picker { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.role-picker label { display: flex; flex-direction: column; gap: 4px; }
+.role-picker select { width: 100%; font-size: 13px; font-weight: 600; }
+.role-desc { margin-top: 5px; line-height: 1.4; }
+.role-initial { display: none; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--brand-tint);
+  color: var(--brand-deep); font-weight: 700; font-size: 13px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--green); }
 .dot.amber { background: var(--amber); }
 .dot.red { background: var(--red); }
@@ -559,6 +566,9 @@ select.active-filter { border-color: var(--brand); color: var(--brand); font-wei
 .pv-placed { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #0b6b2e; background: #e3f4e8;
   padding: 5px 12px; border-radius: 999px; }
 .pv-confirm { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.pv-submit { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pv-submit-title { font-size: 13px; font-weight: 600; }
+.pv-submit textarea { width: 100%; min-height: 54px; }
 .as-details { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; font-size: 12px; }
 .as-run { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 3px; background: #fff; }
 @media (prefers-reduced-motion: reduce) {
@@ -585,6 +595,9 @@ select.active-filter { border-color: var(--brand); color: var(--brand); font-wei
 .shell.rail .nav a svg { width: 18px; height: 18px; }
 .shell.rail .sidebar-foot { padding: 12px 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .shell.rail .sidebar-foot .row { margin-top: 0 !important; gap: 0; }
+.shell.rail .role-picker { margin-bottom: 4px; }
+.shell.rail .role-initial { display: grid; }
+.shell.rail .role-desc { display: none; }
 @media (prefers-reduced-motion: reduce) { .shell { transition: none; } }
 
 /* short windows: keep the fresh conversation on one screen */

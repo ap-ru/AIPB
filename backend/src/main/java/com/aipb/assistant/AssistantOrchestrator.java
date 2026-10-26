@@ -4,6 +4,7 @@ import com.aipb.assistant.llm.LlmException;
 import com.aipb.assistant.stages.*;
 import com.aipb.model.Layout;
 import com.aipb.source.SourceException;
+import com.aipb.widget.WidgetDefinition;
 import com.aipb.widget.WidgetDefinitionRepository;
 import com.aipb.widget.WidgetLibrary;
 import com.aipb.widget.WidgetPlacement;
@@ -24,7 +25,7 @@ import java.util.function.Supplier;
  * Runs the widget assistant: a code-orchestrated pipeline of narrow stages, each a separate Claude conversation with
  * one objective and a deterministic gate.
  * <pre>
- * message -> INTAKE -> proceed -> BUILD -> PRESENT -> proposal -> banker approves -> saved to the library + placed
+ * message -> INTAKE -> proceed -> BUILD -> PRESENT -> proposal -> approved -> personal library + placed -> submit for review
  *                   -> clarify / answer / decline / reuse (reply, no build)
  *                   -> verify (opt-in) -> REVIEW -> [findings -> BUILD -> PRESENT]
  * </pre>
@@ -63,9 +64,10 @@ public class AssistantOrchestrator {
         public BusyException() { super("the assistant is still working on the previous message"); }
     }
 
-    public AssistantSession create(String layoutId, String pageId, Map<String, String> params) {
+    public AssistantSession create(String layoutId, String pageId, Map<String, String> params, String owner) {
         AssistantSession s = new AssistantSession();
         s.setId(UUID.randomUUID().toString());
+        s.setOwner(owner);
         s.setLayoutId(layoutId == null ? "default" : layoutId);
         s.setPageId(pageId);
         if (params != null) s.setParams(new LinkedHashMap<>(params));
@@ -101,7 +103,17 @@ public class AssistantOrchestrator {
         });
     }
 
-    /** Saves the proposed widget to the library and places it on the session's page; returns the layout. */
+    /** The session, if it belongs to {@code actorId}; someone else's conversation is reported as not found. */
+    public AssistantSession get(String id, String actorId) {
+        AssistantSession s = get(id);
+        if (s.getOwner() != null && !s.getOwner().equals(actorId)) throw new NoSuchElementException("assistant session " + id);
+        return s;
+    }
+
+    /**
+     * Saves the proposed widget to the owner's personal library and places it on the session's page; returns the
+     * layout. A new widget ends with an offer to submit it to the global library for review.
+     */
     public Map<String, Object> approve(String sessionId, boolean confirmUnverified) {
         return withLock(sessionId, () -> {
             AssistantSession s = get(sessionId);
@@ -120,17 +132,45 @@ public class AssistantOrchestrator {
                 JsonNode brief = s.getBrief() == null ? null : read(s.getBrief());
                 if (brief != null) prov.put("question", brief.path("question").asText());
                 prov.put("reviewed", s.getReviewState());
-                definitionId = library.create(spec, "assistant", s.getLayoutId(), s.getPageId(), s.getParams()).definition().getId();
+                definitionId = library.create(spec, "assistant", s.getOwner(), WidgetDefinition.PERSONAL,
+                        s.getLayoutId(), s.getPageId(), s.getParams()).definition().getId();
             }
             Layout layout = placement.placeDefinition(s.getLayoutId(), s.getPageId(), definitionId, "assistant");
             s.setPlacedDefinitionId(definitionId);
             s.setStatus(AssistantSession.PLACED);
-            s.getTurns().add(new AssistantSession.Turn("assistant", "Added \"" + proposal.path("title").asText() + "\" to the page.", "message", Instant.now()));
+            String title = proposal.path("title").asText();
+            s.getTurns().add("reuse".equals(proposal.path("kind").asText())
+                    ? new AssistantSession.Turn("assistant", "Added \"" + title + "\" to the page.", "message", Instant.now())
+                    : new AssistantSession.Turn("assistant", "Added \"" + title + "\" to the page and saved it to your personal library. "
+                        + "Submit it to the global library so a Reviewer can approve it for everyone?", "submit-prompt", Instant.now()));
             s.setUpdatedAt(Instant.now());
             sessions.save(s);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("definitionId", definitionId);
             out.put("layout", layout);
+            return out;
+        });
+    }
+
+    /** Submits the widget this conversation created to the global library, for a Reviewer to approve. */
+    public Map<String, Object> submit(String sessionId, String note) {
+        return withLock(sessionId, () -> {
+            AssistantSession s = get(sessionId);
+            if (!AssistantSession.PLACED.equals(s.getStatus()) || s.getPlacedDefinitionId() == null)
+                throw new IllegalArgumentException("add the widget before submitting it for review");
+            JsonNode proposal = read(s.getProposal());
+            if ("reuse".equals(proposal.path("kind").asText()))
+                throw new IllegalArgumentException("this widget is already in the library");
+            if ("pending".equals(s.getSubmission())) throw new IllegalArgumentException("this widget is already waiting for review");
+            WidgetDefinition d = library.submitForReview(s.getPlacedDefinitionId(), s.getOwner(), note);
+            s.setSubmission("pending");
+            s.getTurns().add(new AssistantSession.Turn("assistant", "Submitted \"" + d.getTitle() + "\" for review. It stays in your "
+                    + "personal library until a Reviewer approves it for the global library.", "message", Instant.now()));
+            s.setUpdatedAt(Instant.now());
+            sessions.save(s);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("definitionId", d.getId());
+            out.put("review", d.reviewStatus());
             return out;
         });
     }

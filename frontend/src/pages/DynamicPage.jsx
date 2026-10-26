@@ -53,8 +53,15 @@ function usePageParams(page) {
   return { defs, options, period, filters, filterOptions, values, ready: defs.every((p) => values[p.name]), error, set };
 }
 
+/** Where a definition stands: global (no tag), personal, or personal and waiting for review. */
+function ScopeTag({ d }) {
+  if (d.scope !== 'personal') return null;
+  return d.review === 'pending' ? <span className="tag amber">Pending review</span> : <span className="tag violet">Personal</span>;
+}
+
+/** The global library plus the actor's personal widgets; an author can submit their own for review from here. */
 function LibraryTab({ pageId, onDone }) {
-  const { addWidget } = usePlatform();
+  const { addWidget, can } = usePlatform();
   const q = useApi('/api/widgets/library');
   const [problem, setProblem] = useState(null);
   const place = async (d) => {
@@ -64,6 +71,13 @@ function LibraryTab({ pageId, onDone }) {
       onDone();
     } catch (e) { setProblem(e.message); }
   };
+  const submit = async (d) => {
+    setProblem(null);
+    try {
+      await api.post(`/api/widgets/library/${d.id}/submit`, {});
+      q.reload();
+    } catch (e) { setProblem(e.message); }
+  };
   return (
     <div className="stack" style={{ gap: 8 }}>
       {problem && <div className="error-box">⚠ {problem}</div>}
@@ -71,12 +85,15 @@ function LibraryTab({ pageId, onDone }) {
         {(defs) => defs.map((d) => (
           <div key={d.id} className="spec-list-item">
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="spec-list-title">{d.title} <span className="tag">{d.primitive}</span></div>
+              <div className="spec-list-title">{d.title} <span className="tag">{d.primitive}</span> <ScopeTag d={d} /></div>
               <div className="muted" style={{ fontSize: 12 }}>{d.description}</div>
               <div className="mono dim" style={{ fontSize: 11, marginTop: 3 }}>
                 {d.id} · v{d.version} · {d.collection}{d.params?.length ? ' · needs ' + d.params.join(', ') : ''}
               </div>
             </div>
+            {can.canAuthor && d.scope === 'personal' && d.review !== 'pending' && (
+              <button className="btn small ghost" onClick={() => submit(d)} title="Submit to the global library for a Reviewer to approve">Submit for review</button>
+            )}
             <button className="btn small" onClick={() => place(d)}>Place</button>
           </div>
         ))}
@@ -123,8 +140,10 @@ function BuiltInTab({ pageId, onDone }) {
 const TABS = [['library', 'Library'], ['spec', 'Write a spec'], ['builtin', 'Built-in']];
 
 function AddWidgetModal({ page, pageParams, onClose }) {
-  const { addWidget } = usePlatform();
+  const { addWidget, can } = usePlatform();
   const [tab, setTab] = useState('library');
+  // writing widgets is for Builders and Reviewers; a Banker places from the library
+  const tabs = can.canAuthor ? TABS : TABS.filter(([k]) => k === 'library');
   const placeSaved = async (saved) => {
     await addWidget(page.id, { type: 'spec', title: saved.title, span: 0, config: { definitionId: saved.id } });
     onClose();
@@ -134,7 +153,7 @@ function AddWidgetModal({ page, pageParams, onClose }) {
       <div className={'modal' + (tab === 'spec' ? ' wide' : '')} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><h3 style={{ margin: 0, fontSize: 15 }}>Add widget to {page.title}</h3>
           <div className="row" style={{ gap: 6, marginLeft: 16 }}>
-            {TABS.map(([k, label]) => <button key={k} className={'chip' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{label}</button>)}
+            {tabs.length > 1 && tabs.map(([k, label]) => <button key={k} className={'chip' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{label}</button>)}
           </div>
           <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={onClose}><Icon name="x" /></button></div>
         <div className="modal-body">
@@ -215,7 +234,7 @@ function ContextBar({ params }) {
 
 export default function DynamicPage() {
   const { pageId = 'command-center' } = useParams();
-  const { layout, deletePage, resetLayout, setAssistantOpen } = usePlatform();
+  const { layout, deletePage, resetLayout, setAssistantOpen, role, can } = usePlatform();
   const [adding, setAdding] = useState(false);
   const [assisting, setAssisting] = useState(false);
   // The chat stays mounted once opened, so going back to the dashboard keeps the conversation.
@@ -226,6 +245,8 @@ export default function DynamicPage() {
   const showChat = assisting && params.ready && Boolean(page);
   useEffect(() => { setAssistantOpen(showChat); }, [showChat, setAssistantOpen]);
   useEffect(() => () => setAssistantOpen(false), [setAssistantOpen]);
+  // a conversation belongs to the role that started it: switching roles closes it
+  useEffect(() => { setAssisting(false); setChatOpened(false); setAdding(false); }, [role]);
   if (!layout) return <Loading label="Loading layout" />;
   if (!page) {
     return (
@@ -240,8 +261,10 @@ export default function DynamicPage() {
   const actions = (
     <>
       <ParamPickers params={params} />
-      <button className="btn" onClick={() => { setAssisting(true); setChatOpened(true); }} disabled={!params.ready}
-        title="Describe a widget and the assistant builds it for you to approve"><Icon name="spark" size={13} /> Assistant</button>
+      {can.canUseAssistant && (
+        <button className="btn" onClick={() => { setAssisting(true); setChatOpened(true); }} disabled={!params.ready}
+          title="Describe a widget and the assistant builds it for you to approve"><Icon name="spark" size={13} /> Assistant</button>
+      )}
       <button className="btn" onClick={() => setAdding(true)} disabled={!params.ready}><Icon name="plus" size={13} /> Widget</button>
       <button className="btn danger" title="Delete this page" onClick={async () => {
         const msg = page.system
@@ -267,7 +290,7 @@ export default function DynamicPage() {
           {adding && <AddWidgetModal page={page} pageParams={params.values} onClose={() => setAdding(false)} />}
         </div>
       )}
-      {chatOpened && params.ready && (
+      {chatOpened && can.canUseAssistant && params.ready && (
         <div className="chat-host" hidden={!showChat}>
           <AssistantChat page={page} pageParams={params.values} toolbar={<ParamPickers params={params} />} onClose={() => setAssisting(false)} />
         </div>

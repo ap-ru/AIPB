@@ -1,6 +1,7 @@
 package com.aipb.web;
 
 import com.aipb.assistant.AssistantOrchestrator;
+import com.aipb.identity.Actor;
 import com.aipb.source.SourceException;
 import com.aipb.widget.WidgetLibrary;
 import org.springframework.http.HttpStatus;
@@ -22,6 +23,11 @@ public class ApiErrors {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> badRequest(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
+    }
+
+    @ExceptionHandler(Actor.Forbidden.class)
+    public ResponseEntity<Map<String, String>> forbidden(Actor.Forbidden e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", String.valueOf(e.getMessage())));
     }
 
     @ExceptionHandler(SourceException.class)

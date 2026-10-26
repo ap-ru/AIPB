@@ -68,8 +68,28 @@ function ReviewDetail({ review }) {
   );
 }
 
+/** After a new widget is added: offer to publish it to the global library, where a Reviewer approves it for everyone. */
+function SubmitForReview({ submission, busy, onSubmit }) {
+  const [note, setNote] = useState('');
+  if (submission === 'pending') {
+    return <div className="pv-actions"><span className="tag amber">Pending review</span>
+      <span className="pv-hint">In your personal library until a Reviewer approves it.</span></div>;
+  }
+  return (
+    <div className="pv-submit">
+      <div className="pv-submit-title">Share it with everyone?</div>
+      <div className="muted" style={{ fontSize: 12 }}>It’s in your personal library. Submit it to the global library and a Reviewer will check it before it’s available to all bankers.</div>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="What should the reviewer know? (optional)" />
+      <div className="pv-actions">
+        <button className="btn primary small" disabled={busy} onClick={() => onSubmit(note)}>Submit to global library</button>
+        <span className="pv-hint">or keep it personal</span>
+      </div>
+    </div>
+  );
+}
+
 /** A proposal, previewed in the same card chrome a placed widget gets, with the approval actions under it. */
-function Proposal({ proposal, reviewState, placed, busy, page, onAdd, onVerify, onView }) {
+function Proposal({ proposal, reviewState, placed, submission, busy, page, onAdd, onVerify, onView, onSubmit }) {
   const [confirm, setConfirm] = useState(false);
   const [open, setOpen] = useState(false);
   const failed = reviewState === 'failed' && proposal.kind === 'new';
@@ -104,10 +124,13 @@ function Proposal({ proposal, reviewState, placed, busy, page, onAdd, onVerify, 
         </div>
       )}
       {placed ? (
-        <div className="pv-actions">
-          <span className="pv-placed"><Icon name="flag" size={13} /> Added to {page.title}</span>
-          <button className="btn small" onClick={onView}>View on page <Icon name="right" size={12} /></button>
-        </div>
+        <>
+          <div className="pv-actions">
+            <span className="pv-placed"><Icon name="flag" size={13} /> Added to {page.title}</span>
+            <button className="btn small" onClick={onView}>View on page <Icon name="right" size={12} /></button>
+          </div>
+          {proposal.kind === 'new' && <SubmitForReview submission={submission} busy={busy} onSubmit={onSubmit} />}
+        </>
       ) : (
         <>
           {failed && (
@@ -181,7 +204,8 @@ function Composer({ value, onChange, onSend, running, disabled, autoFocus, place
 }
 
 /**
- * The widget assistant as a full-page conversation. It proposes; the banker approves before anything is added.
+ * The widget assistant as a full-page conversation (Builders and Reviewers). It proposes; the user approves before anything
+ * is added, to their personal library and the page, and can then submit it to the global library for review.
  * Kept mounted while hidden, so going back to the dashboard and returning keeps the conversation.
  */
 export default function AssistantChat({ page, pageParams, toolbar, onClose }) {
@@ -246,6 +270,14 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose }) {
     } catch (e) { setProblem(e.message); } finally { setRunning(false); }
   };
 
+  const submit = async (note) => {
+    setRunning(true); setProblem(null);
+    try {
+      await assistant.submit(session.id, note);
+      await refresh(session.id);
+    } catch (e) { setProblem(e.message); } finally { setRunning(false); }
+  };
+
   const turns = session?.turns || [];
   const empty = !turns.length && !pending;
   const lastProposal = turns.map((t) => t.kind).lastIndexOf('proposal');
@@ -274,7 +306,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose }) {
             <div className="chat-hero">
               <div className="chat-hero-mark"><Icon name="spark" size={22} stroke={2} /></div>
               <h1>What should we add to {page.title}?</h1>
-              <p>Describe a widget in plain words. I’ll find the data, check it, and show you a live preview. Nothing is added until you approve it.</p>
+              <p>Describe a widget in plain words. I’ll find the data, check it, and show you a live preview. Nothing is added until you approve it, and what you approve goes to your personal library.</p>
               {composer}
               <div className="chat-suggest">
                 {SUGGESTIONS[forClient ? 'client' : 'book'].map((s) => (
@@ -293,7 +325,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose }) {
                     <div className="msg-text">{t.text}</div>
                     {i === lastProposal && session.proposal && (
                       <Proposal proposal={session.proposal} reviewState={session.reviewState} placed={session.status === 'placed'}
-                        busy={running} page={page} onAdd={add} onVerify={verify} onView={onClose} />
+                        submission={session.submission} busy={running} page={page} onAdd={add} onVerify={verify} onView={onClose} onSubmit={submit} />
                     )}
                   </div>
                 </div>

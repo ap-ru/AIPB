@@ -49,8 +49,16 @@ public class WidgetLibrary implements ApplicationRunner {
 
     public record Saved(WidgetDefinition definition, ValidationReport report) {}
 
-    public List<WidgetDefinition> list() {
-        return repo.findAll().stream().sorted(Comparator.comparing(WidgetDefinition::getTitle)).toList();
+    /** The definitions an actor can see: the global library plus their own personal widgets. */
+    public List<WidgetDefinition> list(String actorId) {
+        return repo.findAll().stream().filter(d -> d.visibleTo(actorId)).sorted(Comparator.comparing(WidgetDefinition::getTitle)).toList();
+    }
+
+    /** A definition the actor can see; someone else's personal widget is reported as not found. */
+    public WidgetDefinition get(String id, String actorId) {
+        WidgetDefinition d = get(id);
+        if (!d.visibleTo(actorId)) throw new NoSuchElementException("widget definition " + id);
+        return d;
     }
 
     public WidgetDefinition get(String id) {
@@ -66,21 +74,42 @@ public class WidgetLibrary implements ApplicationRunner {
         }
     }
 
-    public Saved create(JsonNode spec, String author, String layoutId, String pageId, Map<String, String> params) {
+    /** Saves a new definition owned by {@code owner}, in its personal library or the global one ({@code scope}). */
+    public Saved create(JsonNode spec, String author, String owner, String scope, String layoutId, String pageId, Map<String, String> params) {
         String id = spec.path("id").asText();
         if (repo.existsById(id)) throw new DuplicateException("a widget '" + id + "' already exists; update it, or pick another id");
-        return save(spec, 1, author, layoutId, pageId, params, null);
+        return save(spec, 1, author, owner, scope, null, layoutId, pageId, params, null);
     }
 
-    public Saved update(String id, JsonNode spec, String author, String layoutId, String pageId, Map<String, String> params) {
-        WidgetDefinition current = get(id);
+    /** A new version of a definition; a personal one can only be changed by its owner. Ownership and review carry over. */
+    public Saved update(String id, JsonNode spec, String author, String actorId, String layoutId, String pageId, Map<String, String> params) {
+        WidgetDefinition current = get(id, actorId);
         if (!id.equals(spec.path("id").asText()))
             throw new IllegalArgumentException("spec id '" + spec.path("id").asText() + "' does not match '" + id + "'");
-        return save(spec, current.getVersion() + 1, author, layoutId, pageId, params, current.getCreatedAt());
+        return save(spec, current.getVersion() + 1, author, current.getOwner(), current.getScope(), current.getReview(),
+                layoutId, pageId, params, current.getCreatedAt());
     }
 
-    private Saved save(JsonNode specIn, int version, String author, String layoutId, String pageId,
-                       Map<String, String> params, Instant createdAt) {
+    /**
+     * Asks for a personal widget to be published to the global library. It stays personal until a Reviewer approves it.
+     */
+    public WidgetDefinition submitForReview(String id, String actorId, String note) {
+        WidgetDefinition d = get(id, actorId);
+        if (d.global()) throw new IllegalArgumentException("'" + d.getTitle() + "' is already in the global library");
+        if (!actorId.equals(d.getOwner())) throw new IllegalArgumentException("only the owner can submit '" + d.getTitle() + "' for review");
+        if ("pending".equals(d.reviewStatus())) throw new IllegalArgumentException("'" + d.getTitle() + "' is already waiting for review");
+        WidgetDefinition.Review r = new WidgetDefinition.Review();
+        r.setStatus("pending");
+        r.setSubmittedBy(actorId);
+        r.setSubmittedAt(Instant.now());
+        r.setNote(note == null || note.isBlank() ? null : note.trim());
+        d.setReview(r);
+        d.setUpdatedAt(Instant.now());
+        return repo.save(d);
+    }
+
+    private Saved save(JsonNode specIn, int version, String author, String owner, String scope, WidgetDefinition.Review review,
+                       String layoutId, String pageId, Map<String, String> params, Instant createdAt) {
         ObjectNode spec = (ObjectNode) SpecMigrator.migrate(specIn);
         spec.put("version", version);
         ValidationReport report = validator.validate(spec, layoutId, pageId, params);
@@ -102,6 +131,9 @@ public class WidgetLibrary implements ApplicationRunner {
         d.setCollection(data.sourceLabel(s));
         d.setParams(data.requiredParams(s));
         d.setAuthor(author);
+        d.setOwner(owner);
+        d.setScope(scope);
+        d.setReview(review);
         d.setSpec(spec.toString());
         d.setCreatedAt(createdAt == null ? Instant.now() : createdAt);
         d.setUpdatedAt(Instant.now());
@@ -130,7 +162,7 @@ public class WidgetLibrary implements ApplicationRunner {
                 if (stored != null && stored.getVersion() >= fileVersion) continue;
                 Map<String, String> sample = new LinkedHashMap<>();
                 spec.path("provenance").path("sampleParams").fields().forEachRemaining(e -> sample.put(e.getKey(), e.getValue().asText()));
-                save(spec, fileVersion, "starter", "default", null, sample, stored == null ? null : stored.getCreatedAt());
+                save(spec, fileVersion, "starter", "system", WidgetDefinition.GLOBAL, null, "default", null, sample, stored == null ? null : stored.getCreatedAt());
                 loaded++;
             } catch (SpecInvalidException e) {
                 skipped++;

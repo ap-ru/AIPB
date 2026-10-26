@@ -59,7 +59,7 @@ public class IntakeStage {
         StringBuilder sb = new StringBuilder();
         sb.append(context.page(s.getLayoutId(), s.getPageId(), s.getParams()));
         sb.append(context.dataToday());
-        sb.append(context.library());
+        sb.append(context.library(s.getOwner()));
         if (s.getBrief() != null) {
             sb.append("<current_widget>\nThe banker is working on this widget (a revision changes it; a new subject is a new widget).\nbrief: ")
                     .append(s.getBrief()).append('\n');
@@ -90,7 +90,7 @@ public class IntakeStage {
         switch (outcome) {
             case "reuse" -> {
                 String id = out.path("reuseDefinitionId").asText("");
-                if (!library.existsById(id)) errors.add("reuseDefinitionId '" + id + "' is not in the library; reuse only a listed widget, or choose another outcome");
+                if (!library.findById(id).map(d -> d.visibleTo(s.getOwner())).orElse(false)) errors.add("reuseDefinitionId '" + id + "' is not in the library; reuse only a listed widget, or choose another outcome");
             }
             case "proceed" -> {
                 JsonNode brief = out.path("brief");

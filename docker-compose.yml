@@ -90,9 +90,12 @@ services:
       AIPB_SOURCE_URI: mongodb://bank_reader:${BANK_READER_PASSWORD}@mongo:27017/bank?authSource=bank
       AIPB_SOURCE_DB: bank
       AIPB_MCP_URL: http://mcp:3000/mcp
-      # The widget assistant: enabled when ANTHROPIC_API_KEY is set. Model and per-stage effort (low|medium|high|xhigh|max).
+      # The widget assistant: enabled when ANTHROPIC_API_KEY is set. Per-stage model and effort (low|medium|high|xhigh|max).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      AIPB_ASSISTANT_MODEL: ${AIPB_ASSISTANT_MODEL:-claude-opus-5-5}
+      AIPB_MODEL_INTAKE: ${AIPB_MODEL_INTAKE:-claude-haiku-5-5}
+      AIPB_MODEL_BUILD: ${AIPB_MODEL_BUILD:-claude-sonnet-5-5}
+      AIPB_MODEL_REVIEW: ${AIPB_MODEL_REVIEW:-claude-sonnet-5-5}
+      AIPB_MODEL_PRESENT: ${AIPB_MODEL_PRESENT:-claude-haiku-5-5}
       AIPB_EFFORT_INTAKE: ${AIPB_EFFORT_INTAKE:-medium}
       AIPB_EFFORT_BUILD: ${AIPB_EFFORT_BUILD:-medium}
       AIPB_EFFORT_REVIEW: ${AIPB_EFFORT_REVIEW:-medium}

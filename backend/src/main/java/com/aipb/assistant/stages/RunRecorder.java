@@ -19,7 +19,7 @@ public class RunRecorder {
     public RunRecorder(String stage, AssistantProperties props) {
         this.props = props;
         run.setStage(stage);
-        run.setModel(props.getModel());
+        run.setModel(props.model(stage));
         run.setEffort(props.effort(stage));
         run.setStartedAt(Instant.now());
     }
@@ -44,7 +44,7 @@ public class RunRecorder {
         run.setOutputTokens(usage.output());
         run.setCacheReadTokens(usage.cacheRead());
         run.setCacheWriteTokens(usage.cacheWrite());
-        double cost = props.getPrice().cost(usage.input(), usage.output(), usage.cacheRead(), usage.cacheWrite());
+        double cost = props.price(run.getModel()).cost(usage.input(), usage.output(), usage.cacheRead(), usage.cacheWrite());
         run.setCostUsd(Math.round(cost * 10000) / 10000.0);
         run.setOutcome(outcome);
         run.setError(error);

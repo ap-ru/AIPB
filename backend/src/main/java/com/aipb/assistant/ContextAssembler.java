@@ -139,10 +139,10 @@ public class ContextAssembler {
         return "<data_today>asOfDate: " + asOf + " (the latest closed revenue month is " + lastMonth + ")</data_today>\n";
     }
 
-    /** The widget library, so the assistant can reuse rather than duplicate. */
-    public String library() {
+    /** The widget library the session's owner can see (global plus their personal widgets), so the assistant can reuse rather than duplicate. */
+    public String library(String ownerId) {
         StringBuilder sb = new StringBuilder("<library>\n");
-        List<WidgetDefinition> defs = new ArrayList<>(library.findAll());
+        List<WidgetDefinition> defs = new ArrayList<>(library.findAll().stream().filter(d -> d.visibleTo(ownerId)).toList());
         defs.sort(Comparator.comparing(WidgetDefinition::getId));
         for (WidgetDefinition d : defs) {
             sb.append("- ").append(d.getId()).append(": \"").append(d.getTitle()).append("\" (").append(d.getPrimitive())

@@ -1,5 +1,6 @@
 package com.aipb.widget;
 
+import com.aipb.identity.Actor;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,15 +23,17 @@ public class WidgetController {
 
     /** A spec plus where it is meant to go: the page decides which parameters exist; params are sample values. */
     public record SpecRequest(JsonNode spec, String layoutId, String pageId, Map<String, String> params) {}
+    public record SubmitRequest(String note) {}
 
+    /** The global library plus the actor's personal widgets. */
     @GetMapping("/library")
-    public List<Map<String, Object>> list() {
-        return library.list().stream().map(WidgetController::summary).toList();
+    public List<Map<String, Object>> list(Actor actor) {
+        return library.list(actor.id()).stream().map(WidgetController::summary).toList();
     }
 
     @GetMapping("/library/{id}")
-    public Map<String, Object> get(@PathVariable String id) {
-        WidgetDefinition d = library.get(id);
+    public Map<String, Object> get(@PathVariable String id, Actor actor) {
+        WidgetDefinition d = library.get(id, actor.id());
         Map<String, Object> m = summary(d);
         m.put("spec", library.spec(d));
         return m;
@@ -38,15 +41,25 @@ public class WidgetController {
 
     @PostMapping("/library")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String, Object> create(@RequestBody SpecRequest req) {
-        WidgetLibrary.Saved s = library.create(required(req), "workbench", req.layoutId(), req.pageId(), req.params());
+    public Map<String, Object> create(@RequestBody SpecRequest req, Actor actor) {
+        actor.requireAuthor();
+        WidgetLibrary.Saved s = library.create(required(req), "workbench", actor.id(), WidgetDefinition.PERSONAL,
+                req.layoutId(), req.pageId(), req.params());
         return saved(s);
     }
 
     @PutMapping("/library/{id}")
-    public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req) {
-        WidgetLibrary.Saved s = library.update(id, required(req), "workbench", req.layoutId(), req.pageId(), req.params());
+    public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req, Actor actor) {
+        actor.requireAuthor();
+        WidgetLibrary.Saved s = library.update(id, required(req), "workbench", actor.id(), req.layoutId(), req.pageId(), req.params());
         return saved(s);
+    }
+
+    /** Asks for one of the actor's personal widgets to be published to the global library. */
+    @PostMapping("/library/{id}/submit")
+    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) SubmitRequest req, Actor actor) {
+        actor.requireAuthor();
+        return summary(library.submitForReview(id, actor.id(), req == null ? null : req.note()));
     }
 
     /**
@@ -112,6 +125,9 @@ public class WidgetController {
         m.put("collection", d.getCollection());
         m.put("params", d.getParams());
         m.put("author", d.getAuthor());
+        m.put("owner", d.getOwner());
+        m.put("scope", d.global() ? WidgetDefinition.GLOBAL : WidgetDefinition.PERSONAL);
+        m.put("review", d.reviewStatus());
         m.put("updatedAt", d.getUpdatedAt());
         return m;
     }

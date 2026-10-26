@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -104,7 +105,7 @@ class AssistantOrchestratorTest {
                       "columns":null,"title":null,"subtitle":null,"badge":null,"meta":null},"span":7,"columnOverrides":[]}""";
 
     private String newSession() {
-        return orchestrator.create("default", "client", Map.of("clientId", "CL-0002")).getId();
+        return orchestrator.create("default", "client", Map.of("clientId", "CL-0002"), "demo-builder").getId();
     }
 
     // ------------------------------------------------------------------ tests
@@ -193,7 +194,7 @@ class AssistantOrchestratorTest {
     void aClientScopedBriefOnABookPageIsSentBack() {
         claude.on("intake", FakeGateway.json(BRIEF),
                 FakeGateway.json("{\"outcome\":\"decline\",\"message\":\"Client widgets belong on Client 360.\",\"brief\":null,\"reuseDefinitionId\":null,\"changed\":[]}"));
-        String id = orchestrator.create("default", "command-center", Map.of()).getId();
+        String id = orchestrator.create("default", "command-center", Map.of(), "demo-builder").getId();
         orchestrator.message(id, "show this client's revenue", null, recorder);
         assertThat(((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(2)).blocks().get(0)).text()).contains("scope must be book");
         assertThat(store.get(id).getTurns().get(1).getKind()).isEqualTo("decline");
@@ -262,22 +263,69 @@ class AssistantOrchestratorTest {
     }
 
     @Test
-    void approvingSavesToTheLibraryWithProvenanceAndPlacesIt() {
-        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
-        String id = newSession();
-        orchestrator.message(id, "revenue by quarter", null, recorder);
+    void approvingSavesToThePersonalLibraryWithProvenancePlacesItAndOffersReview() {
+        String id = proposedSession();
         when(definitions.existsById("quarterly-revenue")).thenReturn(true); // taken: the new widget gets a suffix
-        WidgetDefinition saved = new WidgetDefinition();
-        saved.setId("quarterly-revenue-2");
-        when(library.create(any(), eq("assistant"), any(), any(), any())).thenReturn(new WidgetLibrary.Saved(saved, ok()));
 
         orchestrator.approve(id, false);
 
         verify(library).create(argThat(spec -> spec.path("id").asText().equals("quarterly-revenue-2")
                 && spec.path("provenance").path("reviewed").asText().equals("none")
-                && spec.path("provenance").path("question").asText().contains("revenue")), eq("assistant"), eq("default"), eq("client"), any());
+                && spec.path("provenance").path("question").asText().contains("revenue")),
+                eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any());
         verify(placement).placeDefinition("default", "client", "quarterly-revenue-2", "assistant");
-        assertThat(store.get(id).getStatus()).isEqualTo(AssistantSession.PLACED);
+        AssistantSession s = store.get(id);
+        assertThat(s.getStatus()).isEqualTo(AssistantSession.PLACED);
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getKind()).isEqualTo("submit-prompt");
+        assertThat(s.getSubmission()).isEqualTo("none");
+    }
+
+    @Test
+    void submittingAfterApprovalMarksItPending() {
+        String id = proposedSession();
+        orchestrator.approve(id, false);
+        WidgetDefinition pending = new WidgetDefinition();
+        pending.setId("quarterly-revenue");
+        pending.setTitle("Quarterly revenue");
+        WidgetDefinition.Review review = new WidgetDefinition.Review();
+        review.setStatus("pending");
+        pending.setReview(review);
+        when(library.submitForReview("quarterly-revenue", "demo-builder", "Matches the finance pack")).thenReturn(pending);
+
+        Map<String, Object> out = orchestrator.submit(id, "Matches the finance pack");
+
+        assertThat(out).containsEntry("review", "pending");
+        AssistantSession s = store.get(id);
+        assertThat(s.getSubmission()).isEqualTo("pending");
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getText()).contains("Submitted \"Quarterly revenue\" for review");
+        assertThatThrownBy(() -> orchestrator.submit(id, null)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already");
+    }
+
+    @Test
+    void submittingBeforeApprovalIsRefused() {
+        String id = proposedSession();
+        assertThatThrownBy(() -> orchestrator.submit(id, null)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("add the widget");
+        verify(library, never()).submitForReview(any(), any(), any());
+    }
+
+    @Test
+    void aSessionBelongsToItsOwner() {
+        String id = newSession();
+        assertThat(orchestrator.get(id, "demo-builder").getId()).isEqualTo(id);
+        assertThatThrownBy(() -> orchestrator.get(id, "demo-reviewer")).isInstanceOf(NoSuchElementException.class);
+    }
+
+    /** A session with a new widget proposed; approving it saves "quarterly-revenue" (or the id the test makes it take). */
+    private String proposedSession() {
+        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        String id = newSession();
+        orchestrator.message(id, "revenue by quarter", null, recorder);
+        when(library.create(any(), eq("assistant"), any(), any(), any(), any(), any())).thenAnswer(i -> {
+            WidgetDefinition d = new WidgetDefinition();
+            d.setId(((JsonNode) i.getArgument(0)).path("id").asText());
+            return new WidgetLibrary.Saved(d, ok());
+        });
+        return id;
     }
 
     // ------------------------------------------------------------------ helpers
