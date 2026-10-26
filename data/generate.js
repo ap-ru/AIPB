@@ -11,13 +11,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const GENERATOR_VERSION = 1;
+const GENERATOR_VERSION = 2;
 const SEED = 42;
 const SEED_DIR = process.env.SEED_DIR || (typeof __dirname !== 'undefined' ? __dirname : '/seed');
 const RESET = process.env.BANK_RESET === 'true';
 const bank = db.getSiblingDB(process.env.BANK_DB || 'bank');
 
-const COLLECTIONS = ['products', 'clients', 'holdings', 'revenue_monthly', 'covenants', 'opportunities', 'signals', 'contacts', 'activities'];
+const PRECALL = ['precall_company_profiles', 'precall_citizens_products', 'precall_citizens_coverage', 'precall_citizens_relationship_kpis',
+  'precall_company_financial_kpis', 'precall_company_contacts', 'precall_company_event_history', 'precall_company_risk_rating_history'];
+const COLLECTIONS = ['products', 'clients', 'holdings', 'revenue_monthly', 'covenants', 'opportunities', 'signals', 'contacts', 'activities', ...PRECALL];
 
 if (bank.getCollection('_meta').findOne() && !RESET) {
   print(`bank already generated (asOfDate ${bank.getCollection('_meta').findOne().asOfDate.toISOString().slice(0, 10)}) - skipping. Set BANK_RESET=true to regenerate.`);
@@ -598,10 +600,233 @@ clients.forEach((c) => {
   mine.forEach((ct) => { if (!ct.lastContactDate) ct.lastContactDate = daysFromAsOf(-int(181, 400)); });
 });
 
+// ------------------------------------------------------------------ pre-call brief (precall_*)
+// The pre-call brief's source data, shaped like the bank's pre-call workbooks: one profile per client plus Citizens
+// products, coverage and relationship KPIs, the company's financial KPIs, contacts, event history and internal PD-risk
+// ratings. Values are derived from the rest of this dataset, so the brief and Client 360 agree, and are held the way a
+// workbook holds them: measures one per row with their names verbatim, nothing rescaled; blanks stay null. Synthetic.
+// Own PRNG stream, so every other collection is unchanged.
+state = (SEED * 104729) >>> 0;
+const precall = { profiles: [], products: [], coverage: [], relationshipKpis: [], financialKpis: [], contacts: [], events: [], ratings: [] };
+const NAICS = {
+  Energy: ['211120', 'Crude Petroleum Extraction'], 'Real Estate': ['531120', 'Lessors of Nonresidential Buildings'],
+  Technology: ['334413', 'Semiconductor Manufacturing'], Agriculture: ['111998', 'Other Crop Farming'],
+  Transportation: ['488510', 'Freight Transportation Arrangement'], 'Financial Services': ['523150', 'Investment Banking and Securities'],
+  Media: ['516120', 'Television Broadcasting'], Healthcare: ['325412', 'Pharmaceutical Preparation Manufacturing'],
+  Industrials: ['333249', 'Other Industrial Machinery Manufacturing'], Utilities: ['221122', 'Electric Power Distribution'],
+  Materials: ['325199', 'Other Basic Organic Chemical Manufacturing'], Mining: ['212230', 'Copper, Nickel, Lead, and Zinc Mining'],
+  Consumer: ['311999', 'Other Miscellaneous Food Manufacturing'], Automotive: ['336390', 'Other Motor Vehicle Parts Manufacturing'],
+  Telecom: ['517111', 'Wired Telecommunications Carriers'], 'Aerospace & Defense': ['336411', 'Aircraft Manufacturing'],
+  Hospitality: ['721110', 'Hotels (except Casino Hotels) and Motels'],
+};
+const NO_INVENTORY = ['Financial Services', 'Media', 'Hospitality', 'Real Estate', 'Telecom'];
+const CATEGORY = { credit: 'Credit', deposit: 'Deposits', treasury: 'Treasury Management', markets: 'Global Markets', capital_markets: 'Capital Markets' };
+const COVERAGE = {
+  'Relationship Manager': ['Commercial Banking', 'Relationship Manager', 'Senior Vice President, Relationship Manager'],
+  'Treasury Officer': ['Treasury Solutions', 'Treasury Management Officer', 'Vice President, Treasury Solutions'],
+  'Credit Officer': ['Credit Risk Management', 'Credit Officer', 'Senior Credit Officer'],
+  'Markets Specialist': ['Capital & Global Markets', 'Markets Coverage', 'Director, Global Markets'],
+};
+const EXTRA_COVERAGE = [['Commercial Banking', 'Portfolio Manager', 'Assistant Vice President, Portfolio Management'],
+  ['Treasury Solutions', 'Treasury Implementation', 'Treasury Implementation Manager']];
+const employeeIds = {};
+const employeeId = (name) => (employeeIds[name] ||= String(int(100000, 999999)));
+const bankEmail = (name) => name.toLowerCase().replace(/[^a-z ]/g, '').replace(/ +/g, '.') + '@citizensbank.example';
+const phone = () => `+1 (555) 0${int(10, 99)}-${pad(int(0, 9999), 4)}`;
+const quarterEnd = (k) => new Date(Date.UTC(lastQuarterEnd.getUTCFullYear(), lastQuarterEnd.getUTCMonth() - 3 * k + 1, 0));
+const monthEnd = (k) => new Date(Date.UTC(AS_OF.getUTCFullYear(), AS_OF.getUTCMonth() - k + 1, 0));
+const PD_BY_GRADE = [0.0003, 0.0007, 0.0015, 0.003, 0.006, 0.012, 0.025, 0.05, 0.1];
+const OUTCOMES = {
+  Meeting: ['Client confirmed priorities for next year; follow-up deck requested.', 'CFO open to a pricing review; send proposal within two weeks.',
+    'Discussed capex timing; no immediate financing need.'],
+  Call: ['Treasurer asked for options; agreed to a follow-up call.', 'Walked through the proposal; client comparing two banks.', 'Left voicemail, emailed summary.'],
+  Email: ['Sent indications; awaiting response.', 'Client acknowledged and forwarded to their CFO.'],
+  'Site Visit': ['Toured operations; identified a working capital opportunity.', 'Met plant leadership; pilot scope agreed.'],
+  'Credit Review': ['Rating affirmed; covenant package unchanged.', 'Watch item noted; quarterly monitoring requested.'],
+};
+const usedPrefixes = new Set();
+const usedPrIds = new Set();
+
+clients.forEach((c, i) => {
+  const { stress, growth, team } = gen[c.clientId];
+  let prefix = c.name.toUpperCase().replace(/[^A-Z0-9 ]/g, '').split(' ')[0].slice(0, 10);
+  if (usedPrefixes.has(prefix)) prefix += i;
+  usedPrefixes.add(prefix);
+  let pr;
+  do { pr = int(10000, 99999); } while (usedPrIds.has(pr));
+  usedPrIds.add(pr);
+  const prId = String(pr);
+  const pid = `${prefix}-${prId}`;
+  const child = (tag, n) => `${pid}-${tag}-${pad(n, 4)}`;
+  const base = { clientId: c.clientId, sourcePrId: prId };
+
+  // ---- profile: firmographics as one document, attributes keyed by their source names
+  const kind = weighted([['Public', c.tier === 'Strategic' ? 0.7 : 0.35], ['Private', 0.5], [null, 0.12]]);
+  const [naics, naicsDesc] = NAICS[c.industry] || ['999999', 'Unclassified'];
+  const marketCap = kind === 'Public' ? roundTo(c.annualRevenueUsd * between(0.6, 3.2), 1e6) : null;
+  const price = kind === 'Public' ? r2(between(18, 240)) : null;
+  precall.profiles.push({
+    _id: pid, ...base, companyName: c.name, privatePublicIndicator: kind,
+    attributes: {
+      ticker: kind === 'Public' ? prefix.slice(0, 4) : null, bank_role: weighted([['Lead Left', 3], ['Joint Lead', 2], ['Participant', 2], ['Bilateral', 1]]),
+      NAICS: naics, naics_description: naicsDesc, employee_size: c.employees, annual_revenue: c.annualRevenueUsd,
+      hq_city: c.city, hq_country: c.country, MARKETCAP: marketCap,
+      HIGH_52_WEEK: price === null ? null : r2(price * between(1.05, 1.4)), PRICEHIGH: price === null ? null : r2(price * between(1, 1.05)),
+      PRICINGDATE: price === null ? null : daysFromAsOf(-1),
+    },
+    sampleData: true, sourceWorkbook: `precall_${prefix.toLowerCase()}_${prId}.xlsx`,
+  });
+
+  // ---- Citizens products: one row per product the client holds, with balances and trailing-12-month revenue
+  const ch = holdings.filter((h) => h.clientId === c.clientId && h.status !== 'Pending');
+  const t12ByProduct = {};
+  revenue.filter((r) => r.clientId === c.clientId && r.month >= monthsBack(12)).forEach((r) => { t12ByProduct[r.productId] = (t12ByProduct[r.productId] || 0) + r.totalUsd; });
+  [...new Set(ch.map((h) => h.productId))].forEach((productId, n) => {
+    const hs = ch.filter((h) => h.productId === productId);
+    const p = PRODUCT[productId];
+    const sum = (f) => hs.reduce((s, h) => s + (h[f] || 0), 0);
+    const credit = p.productType === 'credit';
+    const balance = credit ? sum('drawnUsd') : p.productType === 'deposit' ? sum('balanceUsd') : ['markets', 'capital_markets'].includes(p.productType) ? sum('notionalUsd') : null;
+    precall.products.push({
+      _id: child('PRD', n + 1), ...base, partyCount: int(1, 3), product: p.name, productCategory: CATEGORY[p.productType],
+      arrangementCount: hs.length * int(1, 3), totalBalance: balance, creditLimit: credit ? sum('committedUsd') : null,
+      availableBalance: credit ? sum('committedUsd') - sum('drawnUsd') : p.productType === 'deposit' ? balance : null,
+      revenue: t12ByProduct[productId] === undefined ? null : t12ByProduct[productId],
+    });
+  });
+
+  // ---- Citizens coverage: the client's coverage team, plus sometimes a portfolio or implementation banker
+  const coverage = team.map((t) => [t.name, ...COVERAGE[t.role]]);
+  EXTRA_COVERAGE.forEach((x) => { if (chance(0.35)) coverage.push([`${pick(FIRST)} ${pick(LAST)}`, ...x]); });
+  coverage.forEach(([name, division, role, title], n) => {
+    precall.coverage.push({
+      _id: child('COV', n + 1), ...base, employeeTitle: title, employeeDivision: division, employeeName: name,
+      employeeId: employeeId(name), email: bankEmail(name), coverageRole: role,
+    });
+  });
+
+  // ---- contacts: today's contacts, plus former ones and duplicate rows, as a source system keeps them
+  const mine = contacts.filter((x) => x.clientId === c.clientId);
+  const rows = mine.map((x) => [x.name, x.title, x.email]);
+  for (let k = 0; k < int(0, 2); k++) {
+    const nm = `${pick(FIRST)} ${pick(LAST)}`;
+    rows.push([nm, chance(0.6) ? 'No longer with company' : null, chance(0.5) ? null : nm.toLowerCase().replace(' ', '.') + '@former.example']);
+  }
+  if (mine.length && chance(0.35)) { const d = pick(mine); rows.push([d.name, null, d.email]); }
+  rows.forEach(([name, role, email], n) => {
+    const [firstName, ...rest] = name.split(' ');
+    precall.contacts.push({
+      _id: child('CON', n + 1), ...base, role, firstName, lastName: rest.join(' ') || null, email, phone: chance(0.85) ? phone() : null,
+    });
+  });
+
+  // ---- event history: logged activities with their attendee, purpose and a free-text outcome
+  const contactName = Object.fromEntries(mine.map((x) => [x.contactId, x.name]));
+  activities.filter((a) => a.clientId === c.clientId).sort((a, b) => b.date - a.date).forEach((a, n) => {
+    precall.events.push({
+      _id: child('EVT', n + 1), ...base, eventDate: a.date, channel: a.type, attendee: a.contactId ? contactName[a.contactId] || null : null,
+      purpose: a.summary, outcome: chance(0.9) ? pick(OUTCOMES[a.type]) : null, owner: a.owner,
+    });
+  });
+
+  // ---- internal PD-risk ratings: the last six quarters, drifting into today's internal rating
+  const credit = team.find((t) => t.role === 'Credit Officer');
+  const party = String(int(10000000, 99999999));
+  const subsidiary = chance(0.25) ? String(int(10000000, 99999999)) : null;
+  let grade = c.internalRatingGrade;
+  for (let q = 0; q < 6; q++) {
+    const period = quarterEnd(q);
+    [party, ...(subsidiary ? [subsidiary] : [])].forEach((partyId, e) => {
+      const g = clamp(grade + (e === 1 ? 1 : 0), 1, 9);
+      precall.ratings.push({
+        _id: child('RSK', precall.ratings.filter((r) => r.clientId === c.clientId).length + 1), clientId: c.clientId,
+        measurementPeriod: period, involvedPartyId: partyId, primaryLegalEntityFlag: subsidiary ? (e === 0 ? 'Y' : 'N') : null,
+        customerName: (e === 0 ? c.name : `${c.name} Holdings`).toUpperCase(), pdRatingCode: g,
+        pdRatingDate: new Date(period.getTime() - int(5, 60) * DAY),
+        defaultProbability: Math.round(PD_BY_GRADE[g - 1] * between(0.85, 1.15) * 1e6) / 1e6,
+        approvingEmployeeId: employeeId(credit.name), ratingSource: weighted([['RMS', 5], ['Scorecard', 3], ['Override', 1]]),
+      });
+    });
+    if (chance(0.3)) grade = clamp(grade + (stress > 0.5 ? -1 : 1) * (chance(0.5) ? 1 : -1), 1, 9); // older quarters drift
+  }
+
+  // ---- Citizens relationship KPIs: monthly, from the credit revenue the client pays us (RORC as a percent)
+  const credits = ch.filter((h) => h.productType === 'credit');
+  // allocated capital: drawn and undrawn credit, deposits and markets notional all carry some
+  const capital = ch.reduce((s, h) => s + (h.drawnUsd || 0) * 0.08 + ((h.committedUsd || 0) - (h.drawnUsd || 0)) * 0.03
+    + (h.balanceUsd || 0) * 0.02 + (h.productType === 'markets' ? h.notionalUsd * 0.015 : 0), 0) + 2e6;
+  for (let k = 1; k <= 24; k++) {
+    const month = monthsBack(k);
+    const rows = revenue.filter((r) => r.clientId === c.clientId && r.month.getTime() === month.getTime());
+    const creditRows = rows.filter((r) => PRODUCT[r.productId].productType === 'credit');
+    const nii = creditRows.reduce((s, r) => s + r.niiUsd, 0);
+    const fee = creditRows.reduce((s, r) => s + r.feeUsd, 0);
+    // recurring revenue only: one-off capital markets fees would distort an annualized return
+    const total = rows.filter((r) => PRODUCT[r.productId].productType !== 'capital_markets').reduce((s, r) => s + r.totalUsd, 0);
+    const rorc = r2(((total * 12) * (1 - between(0.42, 0.55)) / capital) * 100);
+    const asOf = monthEnd(k);
+    [['RORC', rorc], ['adj rorc', r2(rorc - stress * between(2, 6))],
+      ['net interest income - loans and leases', nii], ['fee income - loans', fee]].forEach(([metricName, metricValue]) => {
+      precall.relationshipKpis.push({
+        _id: child('RKP', precall.relationshipKpis.filter((r) => r.clientId === c.clientId).length + 1), ...base,
+        asOfDate: asOf, metricName, metricValue: chance(0.02) ? null : metricValue,
+      });
+    });
+  }
+
+  // ---- company financial KPIs: three fiscal years and the trailing twelve months, from the spreading source
+  const sourceCustomerId = String(int(100000, 999999));
+  const grossMargin = between(0.22, 0.55);
+  const ebitdaMargin = clamp(between(0.1, 0.26) - stress * 0.08, 0.06, 0.4);
+  const leverage = 1.2 + stress * 3.8 + between(0, 0.8);
+  const drawnWithUs = credits.reduce((s, h) => s + h.drawnUsd, 0);
+  const depositsWithUs = ch.filter((h) => h.productType === 'deposit').reduce((s, h) => s + h.balanceUsd, 0);
+  const fy = AS_OF.getUTCFullYear() - 1;
+  const statements = [[fy - 2, 'Annual', new Date(Date.UTC(fy - 2, 11, 31)), 2], [fy - 1, 'Annual', new Date(Date.UTC(fy - 1, 11, 31)), 1],
+    [fy, 'Annual', new Date(Date.UTC(fy, 11, 31)), 0], [lastQuarterEnd.getUTCFullYear(), 'TTM', lastQuarterEnd, -0.75]];
+  let rowN = 0;
+  statements.forEach(([year, type, date, age]) => {
+    const rev = roundTo(c.annualRevenueUsd * Math.pow(1 + growth, -age) * between(0.97, 1.03), 1e5);
+    const ebitda = roundTo(rev * ebitdaMargin * between(0.92, 1.08), 1e4);
+    const totalDebt = roundTo(Math.max(drawnWithUs * between(1.3, 2.4), ebitda * leverage * between(0.9, 1.1)), 1e5);
+    const interest = roundTo(totalDebt * between(0.05, 0.08), 1e3);
+    const cpltd = totalDebt * 0.05;
+    const grossProfit = roundTo(rev * grossMargin, 1e4);
+    const netIncome = roundTo((ebitda - rev * 0.03 - interest) * 0.75, 1e3);
+    const kpis = {
+      cashandequivs: roundTo(Math.max(depositsWithUs * between(1.2, 2.5), rev * 0.03), 1e4),
+      debt_to_ebitda_rt: r2(totalDebt / ebitda),
+      dio_sp_num: NO_INVENTORY.includes(c.industry) ? null : Math.round(between(20, 95) * 10) / 10,
+      dividendscommon: kind === 'Public' && netIncome > 0 ? roundTo(netIncome * between(0.15, 0.4), 1e3) : kind === 'Public' ? 0 : null,
+      dpo_sp_num: Math.round(between(25, 70) * 10) / 10,
+      dso_sp_num: Math.round(between(30, 75) * 10) / 10,
+      ebitda,
+      ebitda_to_int_exp_cpltd_rt: r2(ebitda / (interest + cpltd)),
+      grossprofit: grossProfit,
+      interestexpense: interest,
+      netincome: netIncome,
+      netcashfromoperativdirect: roundTo(netIncome + rev * 0.03 + rev * gauss() * 0.01, 1e3),
+      revenue: rev,
+      totaldebt: totalDebt,
+      totalopexpenses: roundTo(grossProfit - (ebitda - rev * 0.03), 1e4),
+    };
+    Object.entries(kpis).forEach(([metricName, metricValue]) => {
+      precall.financialKpis.push({
+        _id: child('FIN', ++rowN), ...base, customerName: c.name, source: 'Credit Lense', sourceCustomerId,
+        statementType: type, statementYear: year, statementDate: date, metricName, metricValue: chance(0.03) ? null : metricValue,
+      });
+    });
+  });
+});
+
 // ------------------------------------------------------------------ write
 const docs = {
   products: PRODUCTS.map(([productId]) => ({ _id: productId, ...PRODUCT[productId] })),
   clients, holdings, revenue_monthly: revenue, covenants, opportunities, signals, contacts, activities,
+  precall_company_profiles: precall.profiles, precall_citizens_products: precall.products, precall_citizens_coverage: precall.coverage,
+  precall_citizens_relationship_kpis: precall.relationshipKpis, precall_company_financial_kpis: precall.financialKpis,
+  precall_company_contacts: precall.contacts, precall_company_event_history: precall.events,
+  precall_company_risk_rating_history: precall.ratings,
 };
 COLLECTIONS.forEach((c) => bank.getCollection(c).insertMany(docs[c], { ordered: true }));
 ['holdings', 'revenue_monthly', 'covenants', 'opportunities', 'signals', 'contacts', 'activities'].forEach((c) => bank.getCollection(c).createIndex({ clientId: 1 }));
@@ -609,6 +834,15 @@ bank.revenue_monthly.createIndex({ month: 1 });
 bank.revenue_monthly.createIndex({ holdingId: 1, month: 1 });
 bank.opportunities.createIndex({ stage: 1 });
 bank.signals.createIndex({ detectedAt: -1 });
+// pre-call brief: clientId is the parent key; these follow the data model's recommended indexes
+bank.precall_company_profiles.createIndex({ clientId: 1 }, { unique: true });
+bank.precall_citizens_products.createIndex({ clientId: 1 });
+bank.precall_citizens_coverage.createIndex({ clientId: 1, coverageRole: 1 });
+bank.precall_citizens_relationship_kpis.createIndex({ clientId: 1, asOfDate: -1, metricName: 1 });
+bank.precall_company_financial_kpis.createIndex({ clientId: 1, statementType: 1, statementDate: -1, metricName: 1 });
+bank.precall_company_contacts.createIndex({ clientId: 1, role: 1 });
+bank.precall_company_event_history.createIndex({ clientId: 1, eventDate: -1 });
+bank.precall_company_risk_rating_history.createIndex({ clientId: 1, involvedPartyId: 1, measurementPeriod: -1 });
 
 const catalog = JSON.parse(fs.readFileSync(path.join(SEED_DIR, 'catalog.json'), 'utf8'));
 bank.getCollection('_catalog').insertMany(catalog);
@@ -653,6 +887,16 @@ all('signals').forEach((s) => {
 });
 check(all('activities').every((a) => !a.contactId || contactIds.has(a.contactId)), 'activities: unknown contactId');
 check(all('clients').every((c) => c.healthScore !== null && c.walletSizeUsd > 0), 'clients: healthScore or walletSizeUsd missing');
+// pre-call brief: one profile per client; every child row carries its client's profile prefix
+const profiles = all('precall_company_profiles');
+check(profiles.length === clientIds.size, `precall_company_profiles: ${profiles.length} profiles for ${clientIds.size} clients`);
+const profileOf = Object.fromEntries(profiles.map((p) => [p.clientId, p]));
+PRECALL.filter((c) => c !== 'precall_company_profiles').forEach((c) => {
+  const bad = all(c).filter((d) => !profileOf[d.clientId] || !d._id.startsWith(profileOf[d.clientId]._id + '-')).length;
+  check(bad === 0, `${c}: ${bad} rows whose _id does not carry their client's profile prefix`);
+});
+check(all('precall_citizens_products').every((p) => p.creditLimit === null || p.availableBalance === p.creditLimit - p.totalBalance),
+  'precall_citizens_products: availableBalance != creditLimit - totalBalance');
 
 // the dictionary must describe exactly the fields that exist
 catalog.filter((e) => COLLECTIONS.includes(e._id)).forEach((e) => {

@@ -7,7 +7,8 @@
       "All money amounts are US dollars; their field names end in Usd.",
       "All dates are UTC BSON dates. _meta.asOfDate is 'today' for this dataset; use it, not the wall clock, for 'YTD', 'overdue', 'next 90 days' and similar.",
       "Revenue is booked monthly after month-end close: revenue_monthly holds the 24 closed months before asOfDate, so the current month is never present.",
-      "Fields that do not apply to a document are omitted, not null (for example drawnUsd only exists on credit holdings).",
+      "Fields that do not apply to a document are omitted, not null (for example drawnUsd only exists on credit holdings). Exception: precall_ collections mirror source workbooks, so a blank source value is stored as null.",
+      "precall_ collections hold KPI measures one per row (metricName verbatim, metricValue as supplied): filter on metricName and do not assume measures share a unit or scale.",
       "Values such as healthScore, walletSizeUsd and headroomPct are supplied by upstream bank systems. Metrics under derivedMetrics are not stored and must be computed."
     ],
     "collections": {
@@ -19,7 +20,15 @@
       "opportunities": "Sales pipeline: open and closed deals.",
       "signals": "Detected risk, opportunity, service and market signals, and their triage stage.",
       "contacts": "People at the client the bank deals with.",
-      "activities": "Interactions logged by the coverage team (meetings, calls, credit reviews, ...)."
+      "activities": "Interactions logged by the coverage team (meetings, calls, credit reviews, ...).",
+      "precall_company_profiles": "Pre-call brief: one company profile per client (firmographics as attributes). Parent of the other precall_ collections.",
+      "precall_citizens_products": "Pre-call brief: Citizens products the client holds, with balances, limits and revenue.",
+      "precall_citizens_coverage": "Pre-call brief: Citizens coverage bankers and their roles.",
+      "precall_citizens_relationship_kpis": "Pre-call brief: Citizens relationship profitability measures (RORC, ...) by as-of date, one measure per row.",
+      "precall_company_financial_kpis": "Pre-call brief: the company's financial measures (revenue, EBITDA, leverage, ...) by statement period, one measure per row.",
+      "precall_company_contacts": "Pre-call brief: contacts at the company as the source holds them, including former ones.",
+      "precall_company_event_history": "Pre-call brief: recorded events and interactions with free-text outcomes.",
+      "precall_company_risk_rating_history": "Pre-call brief: internal PD-risk rating history per legal entity."
     },
     "joins": [
       "clients.clientId 1 - n holdings.clientId, revenue_monthly.clientId, covenants.clientId, opportunities.clientId, signals.clientId, contacts.clientId, activities.clientId",
@@ -28,7 +37,8 @@
       "covenants.covenantId 0..1 - n signals.covenantId",
       "holdings.holdingId 0..1 - n signals.holdingId",
       "opportunities.opportunityId 0..1 - n signals.opportunityId",
-      "contacts.contactId 0..1 - n activities.contactId"
+      "contacts.contactId 0..1 - n activities.contactId",
+      "clients.clientId 1 - 1 precall_company_profiles.clientId; precall_company_profiles.clientId 1 - n every other precall_ collection's clientId"
     ]
   },
   {
@@ -302,6 +312,175 @@
       { "name": "summary", "type": "string", "description": "One-line note of what happened." },
       { "name": "owner", "type": "string", "description": "Banker who logged it." },
       { "name": "contactId", "type": "string", "description": "Client contact involved. Absent for internal activities such as credit reviews." }
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_company_profiles",
+    "description": "Pre-call brief: one company profile per client, with its firmographics. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one document per client",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "clients.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic document key: a company prefix and the source pr_id.", "example": "VANTAGE-12345"},
+      {"name": "clientId", "type": "string", "description": "Parent key for every precall_ child collection: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id."},
+      {"name": "companyName", "type": "string", "description": "Source pr_name."},
+      {"name": "privatePublicIndicator", "type": "string", "description": "Source private_public_ind; null when blank in the workbook - do not infer the company type.", "allowedValues": ["Public", "Private"]},
+      {"name": "attributes", "type": "object", "description": "Remaining firmographic attributes keyed by their source names (ticker, bank_role, NAICS, naics_description, employee_size, annual_revenue, hq_city, hq_country, MARKETCAP, HIGH_52_WEEK, PRICEHIGH, PRICINGDATE). Values keep their source meaning; public-market attributes are null for private companies."},
+      {"name": "sampleData", "type": "bool", "description": "Always true: synthetic seed."},
+      {"name": "sourceWorkbook", "type": "string", "description": "Name of the source workbook."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_citizens_products",
+    "description": "Pre-call brief: the Citizens products the client holds, one row per product, with balances and revenue. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per client per product",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
+      {"name": "partyCount", "type": "int", "description": "Source party_count: legal entities on the product."},
+      {"name": "product", "type": "string", "description": "Source product: the product name."},
+      {"name": "productCategory", "type": "string", "description": "Source product_category.", "allowedValues": ["Credit", "Deposits", "Treasury Management", "Global Markets", "Capital Markets"]},
+      {"name": "arrangementCount", "type": "int", "description": "Source arrangement_count: accounts or arrangements under the product."},
+      {"name": "totalBalance", "type": "number", "description": "Source total_balance: drawn for credit, balance for deposits, notional for markets and capital markets; null for fee-only products. Currency/units are not supplied in the worksheet."},
+      {"name": "creditLimit", "type": "number", "description": "Source credit_limit: committed amount, credit products only; grain and currency require business confirmation."},
+      {"name": "availableBalance", "type": "number", "description": "Source available_balance: undrawn commitment for credit, balance for deposits."},
+      {"name": "revenue", "type": "number", "description": "Source product revenue (trailing twelve months in this seed); period and currency require confirmation."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_citizens_coverage",
+    "description": "Pre-call brief: the Citizens employees covering the client and their coverage roles. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per employee per coverage assignment",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
+      {"name": "employeeTitle", "type": "string", "description": "Source employee_title."},
+      {"name": "employeeDivision", "type": "string", "description": "Source employee_division."},
+      {"name": "employeeName", "type": "string", "description": "Source employee_name."},
+      {"name": "employeeId", "type": "string", "description": "Source employee_id, retained as a string identifier."},
+      {"name": "email", "type": "string", "description": "Source email."},
+      {"name": "coverageRole", "type": "string", "description": "Source coverage_name."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_citizens_relationship_kpis",
+    "description": "Pre-call brief: Citizens relationship profitability measures, one row per measure per reporting date. This is Citizens' relationship economics, not the company's own financial performance. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per client per measure per as-of date (monthly, 24 months)",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
+      {"name": "asOfDate", "type": "date", "description": "Source as_of_dt (month end)."},
+      {"name": "metricName", "type": "string", "description": "Source cpr_kpi_name, preserved verbatim. Measures are separate observations: do not treat net interest income as net interest margin, or assume all measures share a scale.", "allowedValues": ["RORC", "adj rorc", "net interest income - loans and leases", "fee income - loans"]},
+      {"name": "metricValue", "type": "number", "description": "Source cpr_kpi_value; no currency, scale or semantic conversion applied (RORC values are percents, income values are monthly USD)."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_company_financial_kpis",
+    "description": "Pre-call brief: the company's financial measures from its spread statements, one row per measure per statement period. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per client per measure per statement (three fiscal years and the trailing twelve months)",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
+      {"name": "customerName", "type": "string", "description": "Source customer_nm."},
+      {"name": "source", "type": "string", "description": "Source source_of_the_data.", "example": "Credit Lense"},
+      {"name": "sourceCustomerId", "type": "string", "description": "Source customerid, retained as a string identifier."},
+      {"name": "statementType", "type": "string", "description": "Source statementtype.", "allowedValues": ["Annual", "TTM"]},
+      {"name": "statementYear", "type": "int", "description": "Source statementyear."},
+      {"name": "statementDate", "type": "date", "description": "Source statementdate."},
+      {"name": "metricName", "type": "string", "description": "Source financial_kpi_name, preserved verbatim.", "allowedValues": ["cashandequivs", "debt_to_ebitda_rt", "dio_sp_num", "dividendscommon", "dpo_sp_num", "dso_sp_num", "ebitda", "ebitda_to_int_exp_cpltd_rt", "grossprofit", "interestexpense", "netincome", "netcashfromoperativdirect", "revenue", "totaldebt", "totalopexpenses"]},
+      {"name": "metricValue", "type": "number", "description": "Source financial_kpi_value; no currency or scale conversion applied (amounts in USD, *_rt ratios as multiples, dso/dio/dpo in days). Null when missing in the source; zero only when the source says zero."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_company_contacts",
+    "description": "Pre-call brief: contacts at the company as the source holds them. Duplicate and historical rows are preserved (some are marked as no longer with the company); no de-duplication. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per source contact row",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
+      {"name": "role", "type": "string", "description": "Source role; may be missing or a stale-status label such as 'No longer with company'."},
+      {"name": "firstName", "type": "string", "description": "Source first_name."},
+      {"name": "lastName", "type": "string", "description": "Source last_name."},
+      {"name": "email", "type": "string", "description": "Source email."},
+      {"name": "phone", "type": "string", "description": "Source phone."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_company_event_history",
+    "description": "Pre-call brief: recorded client events and interactions, with free-text notes retained as records (not approved facts). Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per event or interaction",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
+      {"name": "eventDate", "type": "date", "description": "Source event_date."},
+      {"name": "channel", "type": "string", "description": "Source channel.", "allowedValues": ["Meeting", "Call", "Email", "Site Visit", "Credit Review"]},
+      {"name": "attendee", "type": "string", "description": "Source attendee: the client contact, null for internal events."},
+      {"name": "purpose", "type": "string", "description": "Source purpose."},
+      {"name": "outcome", "type": "string", "description": "Source outcome: often narrative text."},
+      {"name": "owner", "type": "string", "description": "Source owner: the banker."}
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_company_risk_rating_history",
+    "description": "Pre-call brief: internal PD-risk observations per legal entity and quarter. These are Citizens internal risk data, not agency ratings. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
+    "grain": "one row per legal entity per measurement period (last six quarters)",
+    "primaryKey": "_id",
+    "relationships": [
+      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+    ],
+    "fields": [
+      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, RSK and a row number."},
+      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
+      {"name": "measurementPeriod", "type": "date", "description": "Source MEASUREMENT_PERIOD_DT (quarter end)."},
+      {"name": "involvedPartyId", "type": "string", "description": "Source INVOLVED_PARTY_ID, retained as a string identifier."},
+      {"name": "primaryLegalEntityFlag", "type": "string", "description": "Source PRIMARY_LE_FLAG when supplied (clients with more than one rated entity); null otherwise.", "allowedValues": ["Y", "N"]},
+      {"name": "customerName", "type": "string", "description": "Source CUSTOMER_NM."},
+      {"name": "pdRatingCode", "type": "int", "description": "Source PD_RATING_CD: internal code (1 best - 9 worst), not an agency grade."},
+      {"name": "pdRatingDate", "type": "date", "description": "Source PD_RATING_DT."},
+      {"name": "defaultProbability", "type": "number", "description": "Source PDFT_FINAL_SET_POINT_ORA_RT: probability of default as a fraction, as supplied."},
+      {"name": "approvingEmployeeId", "type": "string", "description": "Source PD_APPROVING_EMPLOYEE_NUM: the approving credit officer (precall_citizens_coverage.employeeId)."},
+      {"name": "ratingSource", "type": "string", "description": "Source PD_RATING_SOURCE_CD.", "allowedValues": ["RMS", "Scorecard", "Override"]}
     ],
     "derivedMetrics": []
   }
