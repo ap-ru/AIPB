@@ -25,6 +25,57 @@ public class LayoutService {
         });
     }
 
+    /**
+     * The layout as an actor sees it: without other people's personal placements (widgets not approved yet, placed by
+     * their Builder and visible only to them).
+     */
+    public Layout get(String id, String actorId) {
+        Layout l = get(id);
+        l.getPages().forEach(p -> p.getWidgets().removeIf(w -> w.getVisibleTo() != null && !w.getVisibleTo().equals(actorId)));
+        return l;
+    }
+
+    /** Puts back the placements an actor could not see (and so could not have sent) when they save a whole layout. */
+    public Layout saveAs(Layout body, String actorId) {
+        Layout stored = get(body.getId());
+        for (Layout.Page sp : stored.getPages()) {
+            Layout.Page bp = body.page(sp.getId());
+            if (bp == null) continue;
+            sp.getWidgets().stream().filter(w -> w.getVisibleTo() != null && !w.getVisibleTo().equals(actorId))
+                    .filter(w -> bp.getWidgets().stream().noneMatch(x -> x.getId().equals(w.getId())))
+                    .forEach(w -> bp.getWidgets().add(w));
+        }
+        return save(body);
+    }
+
+    /** A personal widget was approved: its placements become visible to everyone. */
+    public void openPlacements(String definitionId) {
+        forPlacements(definitionId, (p, w) -> { w.setVisibleTo(null); return false; });
+    }
+
+    /** A personal widget was rejected: it can never go live, so its placements come off every page. */
+    public void removePlacements(String definitionId) {
+        forPlacements(definitionId, (p, w) -> true);
+    }
+
+    /** Applies {@code change} to every placement of a definition; it returns true to remove the placement. */
+    private void forPlacements(String definitionId, java.util.function.BiPredicate<Layout.Page, Layout.Widget> change) {
+        for (Layout l : repo.findAll()) {
+            boolean dirty = false;
+            for (Layout.Page p : l.getPages()) {
+                var it = p.getWidgets().iterator();
+                while (it.hasNext()) {
+                    Layout.Widget w = it.next();
+                    Object def = w.getConfig() == null ? null : w.getConfig().get("definitionId");
+                    if (!definitionId.equals(def)) continue;
+                    if (change.test(p, w)) it.remove();
+                    dirty = true;
+                }
+            }
+            if (dirty) save(l);
+        }
+    }
+
     public Layout save(Layout l) {
         l.setVersion(l.getVersion() + 1);
         l.setUpdatedAt(Instant.now());

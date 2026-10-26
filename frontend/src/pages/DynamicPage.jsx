@@ -53,9 +53,18 @@ function usePageParams(page) {
   return { defs, options, period, filters, filterOptions, values, ready: defs.every((p) => values[p.name]), error, set };
 }
 
-/** The widget library: approved and stock widgets (pending ones wait in the Skills window until approved). */
+/** Where a definition stands: global (no tag), personal, or personal and waiting for review. */
+function ScopeTag({ d }) {
+  if (d.scope !== 'personal') return null;
+  if (d.review === 'pending') return <span className="tag amber">Pending review</span>;
+  if (d.review === 'changes_requested') return <span className="tag pink">Feedback &amp; revise</span>;
+  if (d.review === 'rejected') return <span className="tag red">Rejected</span>;
+  return <span className="tag violet">Personal</span>;
+}
+
+/** The global library plus the actor's personal widgets; an author can submit their own for review from here. */
 function LibraryTab({ pageId, onDone }) {
-  const { addWidget } = usePlatform();
+  const { addWidget, can } = usePlatform();
   const q = useApi('/api/widgets/library');
   const [problem, setProblem] = useState(null);
   const place = async (d) => {
@@ -65,6 +74,13 @@ function LibraryTab({ pageId, onDone }) {
       onDone();
     } catch (e) { setProblem(e.message); }
   };
+  const submit = async (d) => {
+    setProblem(null);
+    try {
+      await api.post(`/api/widgets/library/${d.id}/submit`, {});
+      q.reload();
+    } catch (e) { setProblem(e.message); }
+  };
   return (
     <div className="stack" style={{ gap: 8 }}>
       {problem && <div className="error-box">⚠ {problem}</div>}
@@ -72,13 +88,16 @@ function LibraryTab({ pageId, onDone }) {
         {(defs) => defs.map((d) => (
           <div key={d.id} className="spec-list-item">
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="spec-list-title">{d.title} <span className="tag">{d.primitive}</span></div>
+              <div className="spec-list-title">{d.title} <span className="tag">{d.primitive}</span> <ScopeTag d={d} /></div>
               <div className="muted" style={{ fontSize: 12 }}>{d.description}</div>
               <div className="mono dim" style={{ fontSize: 11, marginTop: 3 }}>
                 {d.id} · v{d.version} · {d.collection}{d.params?.length ? ' · needs ' + d.params.join(', ') : ''}
               </div>
             </div>
-            <button className="btn small" onClick={() => place(d)}>Place</button>
+            {can.canAuthor && d.scope === 'personal' && ['none', 'changes_requested'].includes(d.review) && (
+              <button className="btn small ghost" onClick={() => submit(d)} title="Submit to the global library for a Reviewer to approve">Submit for review</button>
+            )}
+            {d.review !== 'rejected' && <button className="btn small" onClick={() => place(d)}>Place</button>}
           </div>
         ))}
       </Async>

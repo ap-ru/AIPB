@@ -269,52 +269,79 @@ class AssistantOrchestratorTest {
     }
 
     @Test
-    void aBuilderSubmitsForApprovalWithProvenanceAndNothingIsPlaced() {
-        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
-        String id = newSession();
-        orchestrator.message(id, "revenue by quarter", null, recorder);
+    void approvingSavesToThePersonalLibraryWithProvenancePlacesItAndOffersReview() {
+        // Add & share: personal library + placed where only its Builder sees it + shared for review in one step
+        String id = proposedSession();
         when(workflow.idTaken("quarterly-revenue")).thenReturn(true); // taken: the new widget gets a suffix
-        when(workflow.submit(any(), eq(BUILDER))).thenReturn(submission("sub-1", "quarterly-revenue-2", WidgetSubmission.PENDING, null));
+        when(workflow.share(eq("quarterly-revenue-2"), eq(BUILDER), any(), any(), any(), any(), any(), any()))
+                .thenReturn(submission("sub-1", "quarterly-revenue-2", WidgetSubmission.PENDING, null));
 
-        orchestrator.submit(id, false, BUILDER);
+        orchestrator.approve(id, false, "Matches the finance pack", BUILDER);
 
-        verify(workflow).submit(argThat(r -> r.spec().path("id").asText().equals("quarterly-revenue-2")
-                && r.modifies() == null && r.sessionId().equals(id) && r.pageId().equals("client")
-                && r.spec().path("provenance").path("reviewed").asText().equals("none")
-                && r.spec().path("provenance").path("question").asText().contains("revenue")), eq(BUILDER));
-        verifyNoInteractions(placement);
+        verify(library).create(argThat(spec -> spec.path("id").asText().equals("quarterly-revenue-2")
+                        && spec.path("provenance").path("reviewed").asText().equals("none")
+                        && spec.path("provenance").path("question").asText().contains("revenue")),
+                eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any());
+        verify(placement).placeDefinition("default", "client", "quarterly-revenue-2", "assistant", "demo-builder");
+        verify(workflow).share(eq("quarterly-revenue-2"), eq(BUILDER), eq("Matches the finance pack"), eq("assistant"), eq(id), eq("default"), eq("client"), any());
         AssistantSession s = store.get(id);
-        assertThat(s.getSubmissionId()).isEqualTo("sub-1");
-        assertThat(s.getApproval()).isEqualTo(WidgetSubmission.PENDING);
+        assertThat(s.getStatus()).isEqualTo(AssistantSession.PLACED);
         assertThat(s.getTurns().get(s.getTurns().size() - 1).getKind()).isEqualTo("submitted");
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getText()).contains("personal library").contains("only you see it");
+        assertThat(s.getApproval()).isEqualTo(WidgetSubmission.PENDING);
+        assertThat(s.getSubmissionId()).isEqualTo("sub-1");
     }
 
     @Test
-    void anApproversWidgetIsApprovedAsItIsSubmitted() {
-        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
-        String id = newSession();
-        orchestrator.message(id, "revenue by quarter", null, recorder);
-        when(workflow.submit(any(), eq(REVIEWER))).thenReturn(submission("sub-1", "quarterly-revenue", WidgetSubmission.APPROVED, 1));
+    void submittingAfterApprovalMarksItPending() {
+        String id = proposedSession();
+        when(workflow.share(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(submission("sub-1", "quarterly-revenue", WidgetSubmission.PENDING, null));
+        orchestrator.approve(id, false, null, BUILDER);
+        WidgetDefinition pending = new WidgetDefinition();
+        pending.setId("quarterly-revenue");
+        pending.setTitle("Quarterly revenue");
+        pending.setScope(WidgetDefinition.PERSONAL);
+        WidgetDefinition.Review review = new WidgetDefinition.Review();
+        review.setStatus("pending");
+        pending.setReview(review);
+        when(library.get("quarterly-revenue")).thenReturn(pending);
 
-        orchestrator.submit(id, false, REVIEWER);
+        AssistantSession s = store.get(id);
+        assertThat(s.getApproval()).isEqualTo("pending");
+        assertThatThrownBy(() -> orchestrator.submit(id, null, BUILDER)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already");
+    }
+
+    @Test
+    void submittingBeforeApprovalIsRefused() {
+        String id = proposedSession();
+        assertThatThrownBy(() -> orchestrator.submit(id, null, BUILDER)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("add the widget");
+        verify(library, never()).submitForReview(any(), any(), any());
+    }
+
+    @Test
+    void aReviewersWidgetIsApprovedAndPlacedForEveryone() {
+        String id = proposedSession();
+        when(workflow.share(any(), eq(REVIEWER), any(), any(), any(), any(), any(), any()))
+                .thenReturn(submission("sub-1", "quarterly-revenue", WidgetSubmission.APPROVED, 1));
+
+        orchestrator.approve(id, false, null, REVIEWER);
 
         AssistantSession s = store.get(id);
         assertThat(s.getApproval()).isEqualTo(WidgetSubmission.APPROVED);
         assertThat(s.getApprovedVersion()).isEqualTo(1);
         assertThat(s.getPlacedDefinitionId()).isEqualTo("quarterly-revenue");
-        verifyNoInteractions(placement);
+        assertThat(s.getTurns().get(s.getTurns().size() - 1).getText()).contains("live for everyone");
     }
 
     @Test
-    void aSendBackReachesTheConversationAndTheNextRevisionCarriesTheFeedbackAndResubmits() {
-        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
-        String id = newSession();
-        orchestrator.message(id, "revenue by quarter", null, recorder);
+    void feedbackAndReviseReachesTheConversationAndTheRevisionUpdatesThePersonalCopyAndSharesAgain() {
+        String id = proposedSession();
         WidgetSubmission sub = submission("sub-1", "quarterly-revenue", WidgetSubmission.PENDING, null);
-        when(workflow.submit(any(), eq(BUILDER))).thenReturn(sub);
-        orchestrator.submit(id, false, BUILDER);
+        when(workflow.share(any(), eq(BUILDER), any(), any(), any(), any(), any(), any())).thenReturn(sub);
+        orchestrator.approve(id, false, null, BUILDER);
 
-        // the approver sends it back from Skills
+        // the Reviewer gives feedback & revise from Skills
         WidgetSubmission sent = submission("sub-1", "quarterly-revenue", WidgetSubmission.CHANGES_REQUESTED, null);
         sent.setSessionId(id);
         orchestrator.onDecision(new WidgetWorkflow.Decision(sent, "sent_back", REVIEWER, "Show 12 quarters, not 8"));
@@ -323,7 +350,7 @@ class AssistantOrchestratorTest {
         assertThat(s.getReviewerFeedback()).isEqualTo("Show 12 quarters, not 8");
         assertThat(s.getTurns().get(s.getTurns().size() - 1).getRole()).isEqualTo("reviewer");
 
-        // the builder revises: intake and build both see the feedback
+        // the Builder revises: intake and build both see the feedback
         claude.requests.clear();
         claude.on("intake", FakeGateway.json(BRIEF.replace("\"changed\":[]", "\"changed\":[\"window\"]")))
               .on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
@@ -333,11 +360,30 @@ class AssistantOrchestratorTest {
         assertThat(intakeContext).contains("<reviewer_feedback>").contains("Show 12 quarters").contains("Reviewer: Feedback & revise");
         assertThat(buildContext).contains("Show 12 quarters");
 
+        // Update & share again: the personal copy is revised in place (not placed twice) and shared again
+        WidgetDefinition personal = new WidgetDefinition();
+        personal.setId("quarterly-revenue");
+        personal.setScope(WidgetDefinition.PERSONAL);
+        when(library.find("quarterly-revenue")).thenReturn(Optional.of(personal));
         when(workflow.get("sub-1")).thenReturn(sent);
-        when(workflow.resubmit(eq("sub-1"), any(), eq(BUILDER))).thenReturn(sub);
-        orchestrator.submit(id, false, BUILDER);
-        verify(workflow).resubmit(eq("sub-1"), any(), eq(BUILDER));
+        orchestrator.approve(id, false, null, BUILDER);
+        verify(library).update(eq("quarterly-revenue"), any(), eq("assistant"), eq("demo-builder"), any(), any(), any());
+        verify(placement, times(1)).placeDefinition(any(), any(), any(), any(), any());
+        verify(workflow, times(2)).share(eq("quarterly-revenue"), eq(BUILDER), any(), any(), any(), any(), any(), any());
         assertThat(store.get(id).getReviewerFeedback()).isNull();
+    }
+
+    /** A session with a new widget proposed; Add & share saves "quarterly-revenue" (or the id the test makes it take). */
+    private String proposedSession() {
+        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        String id = newSession();
+        orchestrator.message(id, "revenue by quarter", null, recorder);
+        when(library.create(any(), eq("assistant"), any(), any(), any(), any(), any())).thenAnswer(i -> {
+            WidgetDefinition d = new WidgetDefinition();
+            d.setId(((JsonNode) i.getArgument(0)).path("id").asText());
+            return new WidgetLibrary.Saved(d, ok());
+        });
+        return id;
     }
 
     @Test
@@ -384,8 +430,10 @@ class AssistantOrchestratorTest {
         assertThat(data.path("columns").toString()).contains("\"label\":\"LOB\"").doesNotContain("currency");
 
         when(workflow.submit(any(), eq(BUILDER))).thenReturn(submission("sub-2", "client-revenue-by-lob", WidgetSubmission.PENDING, null));
-        orchestrator.submit(s.getId(), false, BUILDER);
+        orchestrator.approve(s.getId(), false, null, BUILDER);
         verify(workflow).submit(argThat(r -> "client-revenue-by-lob".equals(r.modifies())), eq(BUILDER));
+        verifyNoInteractions(placement); // a change is placed nowhere: everyone keeps seeing the current version
+        verify(library, never()).create(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -431,9 +479,9 @@ class AssistantOrchestratorTest {
         String id = newSession();
         orchestrator.message(id, "revenue this year", null, recorder);
 
-        orchestrator.submit(id, false, BUILDER);
+        orchestrator.approve(id, false, null, BUILDER);
 
-        verify(placement).placeDefinition("default", "client", "client-revenue-ytd", "assistant");
+        verify(placement).placeDefinition("default", "client", "client-revenue-ytd", "assistant", "demo-builder");
         verifyNoInteractions(workflow);
     }
 

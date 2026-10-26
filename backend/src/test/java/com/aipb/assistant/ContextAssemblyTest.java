@@ -48,6 +48,13 @@ class ContextAssemblyTest {
         when(layouts.get(anyString())).thenReturn(Defaults.defaultLayout());
         WidgetDefinitionRepository library = mock(WidgetDefinitionRepository.class);
         List<WidgetDefinition> defs = starterDefinitions();
+        WidgetDefinition personal = new WidgetDefinition(); // someone else's personal widget: not offered for reuse
+        personal.setId("reviewer-private-widget");
+        personal.setTitle("Private");
+        personal.setPrimitive("metric");
+        personal.setOwner("demo-reviewer");
+        personal.setScope(WidgetDefinition.PERSONAL);
+        defs.add(personal);
         when(library.findAll()).thenReturn(defs);
         WidgetDataService widgetData = mock(WidgetDataService.class);
         when(widgetData.options(any())).thenReturn(List.of(Map.of("value", "CL-0002", "label", "Northstar Communities")));
@@ -94,7 +101,9 @@ class ContextAssemblyTest {
         assertThat(page).contains("Client 360").contains("clientId").contains("Northstar Communities (CL-0002)").contains("client-revenue-ytd");
         assertThat(context.page("default", "command-center", Map.of())).contains("parameters: none");
         assertThat(context.dataToday()).contains("2026-10-16").contains("2026-09");
-        assertThat(context.library()).contains("client-covenants").contains("needs clientId").contains("book-revenue-by-lob-monthly").contains("book-wide")
+        assertThat(context.library("demo-builder")).doesNotContain("reviewer-private-widget");
+        assertThat(context.library("demo-reviewer")).contains("reviewer-private-widget");
+        assertThat(context.library("demo-builder")).contains("client-covenants").contains("needs clientId").contains("book-revenue-by-lob-monthly").contains("book-wide")
                 .contains("client-exposure: \"Credit exposure\" (meter; the selected client, or the whole book on a page without one)");
     }
 

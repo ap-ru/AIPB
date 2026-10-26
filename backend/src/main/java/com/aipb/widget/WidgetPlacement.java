@@ -5,6 +5,7 @@ import com.aipb.service.LayoutService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.NoSuchElementException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,16 +22,31 @@ public class WidgetPlacement {
     private final LayoutService layouts;
     private final WidgetDataService widgetData;
     private final WidgetPrimitives primitives;
+    private final WidgetDefinitionRepository definitions;
 
-    /** Places any widget (spec widgets are checked first) and returns the updated layout. */
-    public Layout place(String layoutId, String pageId, Layout.Widget w, Integer position) {
-        if ("spec".equals(w.getType())) checkSpec(layoutId, pageId, w);
+    /**
+     * Places any widget (spec widgets are checked first) and returns the updated layout as {@code actorId} sees it. A
+     * personal (not yet approved) widget can be placed only by its owner, and only they see it on the page until a
+     * Reviewer approves it.
+     */
+    public Layout place(String layoutId, String pageId, Layout.Widget w, Integer position, String actorId) {
+        if ("spec".equals(w.getType())) {
+            checkSpec(layoutId, pageId, w);
+            WidgetDefinition d = definitions.findById(String.valueOf(w.getConfig().get("definitionId"))).orElse(null);
+            if (d != null && !d.global()) {
+                if (!d.visibleTo(actorId)) throw new NoSuchElementException("widget definition " + d.getId());
+                if ("rejected".equals(d.reviewStatus())) throw new IllegalArgumentException("'" + d.getTitle() + "' was rejected and cannot be placed");
+                w.setVisibleTo(d.getOwner());
+            } else {
+                w.setVisibleTo(null);
+            }
+        }
         layouts.addWidget(layoutId, pageId, w, position);
-        return layouts.get(layoutId);
+        return layouts.get(layoutId, actorId);
     }
 
     /** Places a library definition, titled and sized from the definition. */
-    public Layout placeDefinition(String layoutId, String pageId, String definitionId, String createdBy) {
+    public Layout placeDefinition(String layoutId, String pageId, String definitionId, String createdBy, String actorId) {
         Layout.Widget w = new Layout.Widget();
         w.setType("spec");
         w.setSpan(0);
@@ -38,7 +54,7 @@ public class WidgetPlacement {
         Map<String, Object> cfg = new LinkedHashMap<>();
         cfg.put("definitionId", definitionId);
         w.setConfig(cfg);
-        return place(layoutId, pageId, w, null);
+        return place(layoutId, pageId, w, null, actorId);
     }
 
     /** Fills in the title (and width, if none was sent) from the definition. */

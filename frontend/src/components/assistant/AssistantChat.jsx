@@ -69,34 +69,51 @@ function ReviewDetail({ review }) {
   );
 }
 
-/** Where the conversation's widget stands once submitted, and - when approved - adding it to the page. */
-function Approval({ session, page, busy, onPlace, placedHere }) {
+/**
+ * Where the conversation's widget stands after Add & share: personal (only its Builder sees it on the page) while it
+ * waits for review or is being revised; live for everyone once approved; off the page if rejected. A change to a
+ * global widget is not on any page until it is approved.
+ */
+function Approval({ session, proposal, onView }) {
+  const change = Boolean(proposal.modifies) || session.modifies;
+  const view = <button className="btn small" onClick={onView}>View on page <Icon name="right" size={12} /></button>;
   if (session.approval === 'approved') {
-    return (
-      <div className="pv-actions">
-        <span className="tag green">Approved · v{session.approvedVersion}</span>
-        {placedHere
-          ? <span className="pv-placed"><Icon name="flag" size={13} /> Added to {page.title}</span>
-          : <button className="btn primary small" disabled={busy} onClick={onPlace}><Icon name="plus" size={12} /> Add to {page.title}</button>}
-      </div>
-    );
+    return <div className="pv-actions"><span className="tag green">Approved · v{session.approvedVersion} · live for everyone</span>{view}</div>;
   }
-  if (session.approval === 'rejected') return <div className="pv-actions"><span className="tag red">Rejected</span><span className="pv-hint">Start a new chat to build another.</span></div>;
-  if (session.approval === 'changes_requested') return <div className="pv-actions"><span className="tag pink">Feedback &amp; revise</span><span className="pv-hint">Reply with the changes, then resubmit.</span></div>;
-  return <div className="pv-actions"><span className="tag amber">Pending approval</span><span className="pv-hint">You can still reply with changes and resubmit.</span></div>;
+  if (session.approval === 'rejected') {
+    return <div className="pv-actions"><span className="tag red">Rejected</span>
+      <span className="pv-hint">{change ? 'The current version stays as it is.' : 'Removed from the page; it stays in your personal library.'}</span></div>;
+  }
+  if (session.approval === 'changes_requested') {
+    return <div className="pv-actions"><span className="tag pink">Feedback &amp; revise</span>
+      <span className="pv-hint">Reply with the changes, then Add &amp; share again.</span></div>;
+  }
+  return (
+    <div className="pv-actions">
+      <span className="tag amber">Pending review</span>
+      <span className="pv-hint">{change ? 'Everyone, you included, keeps seeing the current version until it’s approved.'
+        : 'In your personal library: only you see it on the page until a Reviewer approves it.'}</span>
+      {!change && view}
+    </div>
+  );
 }
 
-/** A proposal, previewed in the same card chrome a placed widget gets, with the submit actions under it. */
-function Proposal({ proposal, reviewState, placed, submitted, session, reviewer, busy, page, onAdd, onVerify, onView, onPlace, placedHere }) {
+/** A proposal, previewed in the same card chrome a placed widget gets, with Add & share (and a note) under it. */
+function Proposal({ proposal, reviewState, placed, submitted, session, reviewer, busy, page, onAdd, onVerify, onView }) {
   const [confirm, setConfirm] = useState(false);
   const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
   const failed = reviewState === 'failed' && proposal.kind === 'new';
   const p = proposal.preview || {};
   const reuse = proposal.kind === 'reuse';
-  const resubmit = ['pending', 'changes_requested'].includes(session.approval);
+  const again = ['pending', 'changes_requested'].includes(session.approval);
   const label = reuse ? <><Icon name="plus" size={12} /> Add to {page.title}</>
-    : reviewer ? <>Approve{resubmit ? ' changes' : ''}</>
-    : resubmit ? 'Resubmit for approval' : 'Submit for approval';
+    : reviewer ? <><Icon name="plus" size={12} /> Approve &amp; add</>
+    : <><Icon name="plus" size={12} /> {again ? 'Update & share again' : proposal.modifies ? 'Share the change' : 'Add & share'}</>;
+  const title = reuse ? 'Already approved: adds it to the page'
+    : reviewer ? 'Approves it into the global library; live for everyone'
+    : proposal.modifies ? 'Sends the change for review; the current version stays live until it is approved'
+    : 'Saves it to your personal library and the page (only you see it there) and shares it with the Reviewers';
   return (
     <div className="pv">
       {proposal.modifies && <div className="pv-hint">Change to “{session.modifiesTitle || proposal.modifies}” · from v{proposal.baseVersion}</div>}
@@ -127,13 +144,13 @@ function Proposal({ proposal, reviewState, placed, submitted, session, reviewer,
             <div className="pv-section muted">Not independently reviewed. Verify the numbers to have them recomputed separately.</div>}
         </div>
       )}
-      {placed ? (
+      {reuse && placed ? (
         <div className="pv-actions">
           <span className="pv-placed"><Icon name="flag" size={13} /> Added to {page.title}</span>
           <button className="btn small" onClick={onView}>View on page <Icon name="right" size={12} /></button>
         </div>
       ) : submitted ? (
-        <Approval session={session} page={page} busy={busy} onPlace={onPlace} placedHere={placedHere} />
+        <Approval session={session} proposal={proposal} onView={onView} />
       ) : (
         <>
           {failed && (
@@ -142,9 +159,12 @@ function Proposal({ proposal, reviewState, placed, submitted, session, reviewer,
               I understand the review could not verify these numbers.
             </label>
           )}
+          {!reuse && !reviewer && (
+            <textarea className="pv-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="Note for the Reviewer (optional): what should they know?" />
+          )}
           <div className="pv-actions">
-            <button className="btn primary small" disabled={busy || (failed && !confirm)} onClick={() => onAdd(confirm)}
-              title={reuse ? 'Already approved: adds it to the page' : reviewer ? 'Approve it into the library' : 'Send it to a Reviewer; it is not added anywhere until approved'}>
+            <button className="btn primary small" disabled={busy || (failed && !confirm)} onClick={() => onAdd(confirm, note)} title={title}>
               {label}</button>
             {proposal.kind === 'new' && reviewState !== 'passed' && (
               <button className="btn small" disabled={busy} onClick={onVerify} title="An independent check of the numbers (uses extra tokens)">Verify numbers</button>
@@ -237,10 +257,9 @@ function Composer({ value, onChange, onSend, running, disabled, autoFocus, place
  * Kept mounted while hidden, so going back to the dashboard and returning keeps the conversation.
  */
 export default function AssistantChat({ page, pageParams, toolbar, onClose, openSessionId, onElsewhere }) {
-  const { setLayout, role, can, addWidget } = usePlatform();
+  const { setLayout, role, can } = usePlatform();
   const [showSkills, setShowSkills] = useState(false);
   const [attention, setAttention] = useState(0);
-  const [placedHere, setPlacedHere] = useState(false);
   const [enabled, setEnabled] = useState(null);
   const [session, setSession] = useState(null);
   const [text, setText] = useState('');
@@ -254,7 +273,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
   const scroller = useRef(null);
 
   useEffect(() => { assistant.status().then((s) => setEnabled(s.enabled)).catch(() => setEnabled(false)); }, []);
-  const reset = () => { setSession(null); setStages([]); setActivity([]); setAck(null); setProblem(null); setPending(null); setShowDetails(false); setPlacedHere(false); };
+  const reset = () => { setSession(null); setStages([]); setActivity([]); setAck(null); setProblem(null); setPending(null); setShowDetails(false); };
   useEffect(reset, [page.id]);
   const loadAttention = () => skills.list().then((r) => setAttention(r.attention)).catch(() => {});
   useEffect(() => { loadAttention(); }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -318,22 +337,13 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
 
   const verify = () => { setPending('Verify the numbers.'); run((id) => assistant.verify(id, onEvent)); };
 
-  const add = async (confirmUnverified) => {
+  const add = async (confirmUnverified, note) => {
     setRunning(true); setProblem(null);
     try {
-      const r = await assistant.submit(session.id, confirmUnverified);
+      const r = await assistant.approve(session.id, confirmUnverified, note);
       if (r.layout) setLayout(r.layout);
       await refresh(session.id);
       loadAttention();
-    } catch (e) { setProblem(e.message); } finally { setRunning(false); }
-  };
-
-  // an approved widget, added to this page from the conversation
-  const place = async () => {
-    setRunning(true); setProblem(null);
-    try {
-      await addWidget(page.id, { type: 'spec', title: session.proposal?.title, span: 0, config: { definitionId: session.placedDefinitionId } });
-      setPlacedHere(true);
     } catch (e) { setProblem(e.message); } finally { setRunning(false); }
   };
 
@@ -375,8 +385,8 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
               <div className="chat-hero-mark"><Icon name="spark" size={22} stroke={2} /></div>
               <h1>What should we add to {page.title}?</h1>
               <p>Describe a widget in plain words. I’ll find the data, check it, and show you a live preview. {can.canReview
-                ? 'You approve it into the library, then add it where you want it.'
-                : 'You submit it for approval; it can be added to pages once a Reviewer approves it.'}</p>
+                ? 'What you approve goes live for everyone.'
+                : 'Add & share puts it in your personal library and on the page - only you see it there until a Reviewer approves it.'}</p>
               {composer}
               <div className="chat-suggest">
                 {SUGGESTIONS[forClient ? 'client' : 'book'].map((s) => (
@@ -401,8 +411,8 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
                     <div className="msg-text">{t.text}</div>
                     {i === lastProposal && session.proposal && (
                       <Proposal proposal={session.proposal} reviewState={session.reviewState} placed={session.status === 'placed'}
-                        submitted={submitted} session={session} reviewer={can.canReview} placedHere={placedHere}
-                        busy={running} page={page} onAdd={add} onVerify={verify} onView={onClose} onPlace={place} />
+                        submitted={submitted} session={session} reviewer={can.canReview}
+                        busy={running} page={page} onAdd={add} onVerify={verify} onView={onClose} />
                     )}
                   </div>
                 </div>

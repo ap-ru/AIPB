@@ -9,6 +9,7 @@ const STATUS = {
   changes_requested: ['Feedback & revise', 'pink'],
   rejected: ['Rejected', 'red'],
   approved: ['Approved', 'green'],
+  personal: ['Personal · not shared', 'violet'],
 };
 
 const SOURCE = { stock: 'Stock', approved: 'Approved', restore: 'Restored', migrated: 'Existing' };
@@ -55,10 +56,10 @@ function Item({ item, showVersion, onOpen }) {
         {item.comment && item.status !== 'pending' && <div className="skill-comment">“{item.comment}”</div>}
       </div>
       <div className="skill-tags">
-        {item.kind === 'submission' && <StatusTag status={item.status} />}
+        {(item.kind === 'submission' || item.status === 'personal') && <StatusTag status={item.status} />}
         {item.kind === 'submission' && item.baseVersion != null && <span className="tag">change to v{item.baseVersion}</span>}
         {item.kind === 'submission' && item.baseVersion == null && <span className="tag">new</span>}
-        {showVersion && item.kind === 'widget' && <span className="tag">v{item.version}</span>}
+        {showVersion && item.kind === 'widget' && item.status !== 'personal' && <span className="tag">v{item.version}</span>}
         {item.pendingChange && <span className="tag amber">change pending</span>}
         <span className="tag">{item.primitive}</span>
       </div>
@@ -113,7 +114,10 @@ function Versions({ widget, pageParams, onRestored }) {
   );
 }
 
-/** An approved or stock widget: preview, Add to page, Modify; for a Reviewer, its versions. */
+/**
+ * An approved or stock widget: preview, Add to page, Modify; for a Reviewer, its versions. A personal widget not shared
+ * yet: preview, Add to page (only its owner sees it there) and Submit for review.
+ */
 function WidgetDetail({ item, page, pageParams, onModify, onChanged }) {
   const { can, addWidget } = usePlatform();
   const [widget, setWidget] = useState(item);
@@ -132,6 +136,13 @@ function WidgetDetail({ item, page, pageParams, onModify, onChanged }) {
       setNote(`Added to ${page.title}.`);
     } catch (e) { setProblem(e.message); }
   };
+  const [shareNote, setShareNote] = useState('');
+  const personal = widget.scope === 'personal';
+  const share = async () => {
+    setProblem(null); setNote(null);
+    try { await skills.share(widget.id, shareNote.trim() || null); setNote('Shared for review.'); onChanged(); }
+    catch (e) { setProblem(e.message); }
+  };
   const restored = async () => {
     const r = await skills.list();
     const fresh = r.sections.flatMap((s) => s.items).find((i) => i.kind === 'widget' && i.id === widget.id);
@@ -141,8 +152,8 @@ function WidgetDetail({ item, page, pageParams, onModify, onChanged }) {
   return (
     <div className="stack" style={{ gap: 14 }}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
-        <span className="tag green">Approved</span>
-        <span className="tag">v{widget.version}</span>
+        {personal ? <span className="tag violet">Personal · only you</span> : <span className="tag green">Approved</span>}
+        {!personal && <span className="tag">v{widget.version}</span>}
         <span className="tag">{widget.origin === 'stock' ? 'Stock' : 'Built in the app'}</span>
         {widget.pendingChange && <span className="tag amber">A change is waiting for approval</span>}
       </div>
@@ -151,11 +162,20 @@ function WidgetDetail({ item, page, pageParams, onModify, onChanged }) {
       {note && <div className="pv-placed"><Icon name="flag" size={13} /> {note}</div>}
       <div className="row">
         <button className="btn primary small" onClick={add}><Icon name="plus" size={12} /> Add to {page.title}</button>
-        <button className="btn small" onClick={() => onModify(widget)} disabled={Boolean(widget.pendingChange)}
-          title={widget.pendingChange ? 'A change to this widget is already waiting for approval' : 'Change it with the assistant; the new version goes for approval'}>
-          <Icon name="edit" size={12} /> Modify</button>
+        {!personal && (
+          <button className="btn small" onClick={() => onModify(widget)} disabled={Boolean(widget.pendingChange)}
+            title={widget.pendingChange ? 'A change to this widget is already waiting for approval' : 'Change it with the assistant; the new version goes for approval'}>
+            <Icon name="edit" size={12} /> Modify</button>
+        )}
       </div>
-      {can.canReview && <Versions widget={widget} pageParams={pageParams} onRestored={restored} />}
+      {personal && (
+        <div className="skill-decide">
+          <div className="muted" style={{ fontSize: 12 }}>In your personal library: only you see it on pages. Submit it so a Reviewer can approve it for everyone.</div>
+          <textarea rows={2} value={shareNote} onChange={(e) => setShareNote(e.target.value)} placeholder="Note for the Reviewer (optional)" />
+          <div className="row"><button className="btn primary small" onClick={share}>Submit for review</button></div>
+        </div>
+      )}
+      {can.canReview && !personal && <Versions widget={widget} pageParams={pageParams} onRestored={restored} />}
     </div>
   );
 }

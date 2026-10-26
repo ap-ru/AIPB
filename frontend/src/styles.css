@@ -653,3 +653,5 @@ select.active-filter { border-color: var(--brand); color: var(--brand); font-wei
 .chat-earlier { border: 1px dashed var(--line-2); border-radius: 10px; background: var(--panel-2); padding: 8px 12px; margin-bottom: 18px; }
 .chat-earlier .pv-why { margin-left: 0; padding-left: 0; }
 .chat-earlier-group { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+.pv-note { font: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; resize: vertical; width: 100%; box-sizing: border-box; }

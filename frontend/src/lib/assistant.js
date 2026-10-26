@@ -8,11 +8,13 @@ export const assistant = {
   runs: (id) => api.get('/api/assistant/sessions/' + id + '/runs'),
   message: (id, text, params, onEvent) => stream('/api/assistant/sessions/' + id + '/messages', { text, params }, onEvent),
   verify: (id, onEvent) => stream('/api/assistant/sessions/' + id + '/verify', {}, onEvent),
-  submit: (id, confirmUnverified) => api.post('/api/assistant/sessions/' + id + '/submit', { confirmUnverified }),
+  approve: (id, confirmUnverified, note) => api.post('/api/assistant/sessions/' + id + '/approve', { confirmUnverified, note }),
+  submit: (id, note) => api.post('/api/assistant/sessions/' + id + '/submit', { note }),
 };
 
 /** Maker-checker: the Skills window, submissions and their decisions, and widget versions (com.aipb.widget). */
 export const skills = {
+  share: (widgetId, note) => api.post('/api/widgets/library/' + encodeURIComponent(widgetId) + '/submit', { note }),
   list: () => api.get('/api/skills'),
   submission: (id, params) => api.get('/api/submissions/' + id + qs(params)),
   approve: (id, comment) => api.post('/api/submissions/' + id + '/approve', { comment }),

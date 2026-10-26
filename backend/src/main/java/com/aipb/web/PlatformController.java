@@ -1,6 +1,7 @@
 package com.aipb.web;
 
 import com.aipb.context.ContextResolver;
+import com.aipb.identity.Actor;
 import com.aipb.model.Layout;
 import com.aipb.seed.DataSeeder;
 import com.aipb.service.LayoutService;
@@ -27,53 +28,59 @@ public class PlatformController {
     private final ContextResolver contexts;
 
     // ------------------------------------------------------------------ layouts
+    // Every layout returned is the caller's view of it: other people's personal (not yet approved) placements left out.
     @GetMapping("/layouts/{id}")
-    public Layout layout(@PathVariable String id) { return layouts.get(id); }
+    public Layout layout(@PathVariable String id, Actor actor) { return layouts.get(id, actor.id()); }
 
     @PutMapping("/layouts/{id}")
-    public Layout saveLayout(@PathVariable String id, @RequestBody Layout body) {
+    public Layout saveLayout(@PathVariable String id, @RequestBody Layout body, Actor actor) {
         body.setId(id);
-        return layouts.save(body);
+        layouts.saveAs(body, actor.id());
+        return layouts.get(id, actor.id());
     }
 
     @PostMapping("/layouts/{id}/reset")
-    public Layout reset(@PathVariable String id) { return layouts.reset(id); }
+    public Layout reset(@PathVariable String id, Actor actor) {
+        layouts.reset(id);
+        return layouts.get(id, actor.id());
+    }
 
     @PostMapping("/layouts/{id}/pages")
-    public Layout addPage(@PathVariable String id, @RequestBody Layout.Page page) {
+    public Layout addPage(@PathVariable String id, @RequestBody Layout.Page page, Actor actor) {
         if (page.getCreatedBy() == null) page.setCreatedBy("banker");
         layouts.addPage(id, page);
-        return layouts.get(id);
+        return layouts.get(id, actor.id());
     }
 
     @DeleteMapping("/layouts/{id}/pages/{pageId}")
-    public Layout deletePage(@PathVariable String id, @PathVariable String pageId, @RequestParam(defaultValue = "false") boolean force) {
+    public Layout deletePage(@PathVariable String id, @PathVariable String pageId, @RequestParam(defaultValue = "false") boolean force, Actor actor) {
         layouts.deletePage(id, pageId, force);
-        return layouts.get(id);
+        return layouts.get(id, actor.id());
     }
 
     @PostMapping("/layouts/{id}/pages/{pageId}/widgets")
     public Layout addWidget(@PathVariable String id, @PathVariable String pageId, @RequestBody Layout.Widget w,
-                            @RequestParam(required = false) Integer position) {
+                            @RequestParam(required = false) Integer position, Actor actor) {
         if (w.getCreatedBy() == null) w.setCreatedBy("banker");
-        return placement.place(id, pageId, w, position);
+        return placement.place(id, pageId, w, position, actor.id());
     }
 
     @PatchMapping("/layouts/{id}/pages/{pageId}/widgets/{widgetId}")
-    public Layout updateWidget(@PathVariable String id, @PathVariable String pageId, @PathVariable String widgetId, @RequestBody Layout.Widget patch) {
+    public Layout updateWidget(@PathVariable String id, @PathVariable String pageId, @PathVariable String widgetId, @RequestBody Layout.Widget patch, Actor actor) {
         layouts.updateWidget(id, pageId, widgetId, patch);
-        return layouts.get(id);
+        return layouts.get(id, actor.id());
     }
 
     @PostMapping("/layouts/{id}/pages/{pageId}/widgets/{widgetId}/move")
-    public Layout move(@PathVariable String id, @PathVariable String pageId, @PathVariable String widgetId, @RequestParam int delta) {
-        return layouts.moveWidget(id, pageId, widgetId, delta);
+    public Layout move(@PathVariable String id, @PathVariable String pageId, @PathVariable String widgetId, @RequestParam int delta, Actor actor) {
+        layouts.moveWidget(id, pageId, widgetId, delta);
+        return layouts.get(id, actor.id());
     }
 
     @DeleteMapping("/layouts/{id}/pages/{pageId}/widgets/{widgetId}")
-    public Layout removeWidget(@PathVariable String id, @PathVariable String pageId, @PathVariable String widgetId) {
+    public Layout removeWidget(@PathVariable String id, @PathVariable String pageId, @PathVariable String widgetId, Actor actor) {
         layouts.removeWidget(id, pageId, widgetId);
-        return layouts.get(id);
+        return layouts.get(id, actor.id());
     }
 
     /** The choices for a page parameter (e.g. the clients a Client 360 page can show): [{value, label}]. */

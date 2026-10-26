@@ -159,30 +159,33 @@ public class AssistantOrchestrator {
     }
 
     /**
-     * Sends the proposed widget for approval - a resubmission when the conversation's widget was sent back, a change
-     * when it modifies a library widget - or, for a widget reused from the library, places it on the page. An
-     * Reviewer's widget is approved as it is submitted. Nothing new reaches a page here.
+     * Add &amp; share. A new widget is saved to the owner's personal library, placed on the session's page where only they
+     * see it, and shared with the Reviewers (with an optional note); a Reviewer's own is approved at once and goes live
+     * for everyone. After feedback &amp; revise the revised widget replaces the personal copy and is shared again. A change
+     * to a global widget (Modify) is submitted for approval and placed nowhere: everyone keeps seeing the current
+     * version. A widget reused from the library is placed as it is.
      */
-    public Map<String, Object> submit(String sessionId, boolean confirmUnverified, Actor actor) {
+    public Map<String, Object> approve(String sessionId, boolean confirmUnverified, String note, Actor actor) {
         return withLock(sessionId, () -> {
             AssistantSession s = get(sessionId);
-            if (s.getProposal() == null) throw new IllegalArgumentException("there is nothing to submit yet");
+            if (s.getProposal() == null) throw new IllegalArgumentException("there is nothing to add yet");
             JsonNode proposal = read(s.getProposal());
             Map<String, Object> out = new LinkedHashMap<>();
+            String owner = s.getOwner() != null ? s.getOwner() : actor.id();
             if ("reuse".equals(proposal.path("kind").asText())) {
                 String definitionId = proposal.path("definitionId").asText();
-                Layout layout = placement.placeDefinition(s.getLayoutId(), s.getPageId(), definitionId, "assistant");
+                placement.placeDefinition(s.getLayoutId(), s.getPageId(), definitionId, "assistant", owner);
                 s.setPlacedDefinitionId(definitionId);
                 s.setStatus(AssistantSession.PLACED);
                 s.getTurns().add(new AssistantSession.Turn("assistant", "Added \"" + proposal.path("title").asText() + "\" to the page.", "message", Instant.now()));
                 s.setUpdatedAt(Instant.now());
                 sessions.save(s);
                 out.put("definitionId", definitionId);
-                out.put("layout", layout);
+                out.put("layout", layouts.get(s.getLayoutId(), owner));
                 return out;
             }
             if ("failed".equals(s.getReviewState()) && !confirmUnverified)
-                throw new ConfirmationRequired("the review could not verify this widget; confirm to submit it anyway");
+                throw new ConfirmationRequired("the review could not verify this widget; confirm to add it anyway");
             ObjectNode spec = (ObjectNode) read(s.getSpec());
             ObjectNode prov = spec.putObject("provenance");
             prov.put("sessionId", s.getId());
@@ -190,39 +193,85 @@ public class AssistantOrchestrator {
             if (brief != null) prov.put("question", brief.path("question").asText());
             prov.put("reviewed", s.getReviewState());
 
-            WidgetSubmission sub;
             WidgetSubmission previous = s.getSubmissionId() == null ? null : workflow.get(s.getSubmissionId());
+            if (previous != null && WidgetSubmission.REJECTED.equals(previous.getStatus()))
+                throw new WidgetWorkflow.Conflict("this widget was rejected; start a new chat to build another");
+            // after an approval, a further change in the same conversation is a change to that (now global) widget
+            String modifies = previous != null && WidgetSubmission.APPROVED.equals(previous.getStatus()) ? previous.getWidgetId() : s.getModifies();
+            WidgetSubmission sub;
+            String text;
             submitting.set(s.getId());
             try {
-                if (previous != null && previous.open()) {
-                    sub = workflow.resubmit(previous.getId(), spec, actor);
-                } else if (previous != null && WidgetSubmission.REJECTED.equals(previous.getStatus())) {
-                    throw new WidgetWorkflow.Conflict("this widget was rejected; start a new chat to build another");
+                if (modifies != null) {
+                    sub = previous != null && previous.open() ? workflow.resubmit(previous.getId(), spec, actor)
+                            : workflow.submit(new WidgetWorkflow.Submit(spec, "assistant", s.getId(), s.getLayoutId(), s.getPageId(), s.getParams(), modifies), actor);
+                    text = WidgetSubmission.APPROVED.equals(sub.getStatus()) ? "Approved the change to \"" + sub.getTitle() + "\" as v" + sub.getApprovedVersion() + "; every page showing it now has it."
+                            : "Sent the change to \"" + sub.getTitle() + "\" for approval. Everyone, you included, keeps seeing the current version until it's approved.";
                 } else {
-                    // after an approval, a further change in the same conversation is a change to that widget
-                    String modifies = previous != null ? previous.getWidgetId() : s.getModifies();
-                    if (modifies == null) spec.put("id", uniqueId(spec.path("id").asText()));
-                    sub = workflow.submit(new WidgetWorkflow.Submit(spec, "assistant", s.getId(), s.getLayoutId(), s.getPageId(),
-                            s.getParams(), modifies), actor);
+                    String id = s.getPlacedDefinitionId();
+                    boolean revising = id != null && library.find(id).map(d -> !d.global()).orElse(false);
+                    if (revising) {
+                        spec.put("id", id);
+                        library.update(id, spec, "assistant", owner, s.getLayoutId(), s.getPageId(), s.getParams());
+                    } else {
+                        id = uniqueId(spec.path("id").asText());
+                        spec.put("id", id);
+                        library.create(spec, "assistant", owner, WidgetDefinition.PERSONAL, s.getLayoutId(), s.getPageId(), s.getParams());
+                        placement.placeDefinition(s.getLayoutId(), s.getPageId(), id, "assistant", owner);
+                        s.setPlacedDefinitionId(id);
+                    }
+                    sub = workflow.share(id, actor, note, "assistant", s.getId(), s.getLayoutId(), s.getPageId(), s.getParams());
+                    String title = "\"" + sub.getTitle() + "\"";
+                    text = WidgetSubmission.APPROVED.equals(sub.getStatus())
+                            ? "Approved " + title + " as v" + sub.getApprovedVersion() + " and added it to the page - it's live for everyone."
+                            : (revising ? "Updated " + title + " in your personal library and shared it again for review."
+                                : "Added " + title + " to your personal library and to the page - only you see it there until a Reviewer approves it. Shared it for review.");
                 }
+            } finally {
+                submitting.remove();
+            }
+            s.setStatus(AssistantSession.PLACED);
+            s.setSubmissionId(sub.getId());
+            s.setApproval(sub.getStatus());
+            s.setReviewerFeedback(null);
+            if (WidgetSubmission.APPROVED.equals(sub.getStatus())) s.setApprovedVersion(sub.getApprovedVersion());
+            s.getTurns().add(new AssistantSession.Turn("assistant", text, WidgetSubmission.APPROVED.equals(sub.getStatus()) ? "approved" : "submitted", Instant.now()));
+            s.setUpdatedAt(Instant.now());
+            sessions.save(s);
+            out.put("definitionId", sub.getWidgetId());
+            out.put("submission", workflow.item(sub));
+            out.put("layout", layouts.get(s.getLayoutId(), owner));
+            return out;
+        });
+    }
+
+    /** Shares the personal widget this conversation added with the Reviewers (when it was not shared with Add &amp; share). */
+    public Map<String, Object> submit(String sessionId, String note, Actor actor) {
+        return withLock(sessionId, () -> {
+            AssistantSession s = get(sessionId);
+            if (!AssistantSession.PLACED.equals(s.getStatus()) || s.getPlacedDefinitionId() == null)
+                throw new IllegalArgumentException("add the widget before submitting it for review");
+            JsonNode proposal = read(s.getProposal());
+            if ("reuse".equals(proposal.path("kind").asText()))
+                throw new IllegalArgumentException("this widget is already in the library");
+            WidgetDefinition d = library.get(s.getPlacedDefinitionId());
+            if ("pending".equals(d.reviewStatus())) throw new IllegalArgumentException("this widget is already waiting for review");
+            WidgetSubmission sub;
+            submitting.set(s.getId());
+            try {
+                sub = workflow.share(d.getId(), actor, note, "assistant", s.getId(), s.getLayoutId(), s.getPageId(), s.getParams());
             } finally {
                 submitting.remove();
             }
             s.setSubmissionId(sub.getId());
             s.setApproval(sub.getStatus());
-            s.setReviewerFeedback(null);
-            String title = "\"" + sub.getTitle() + "\"";
-            if (WidgetSubmission.APPROVED.equals(sub.getStatus())) {
-                s.setApprovedVersion(sub.getApprovedVersion());
-                s.setPlacedDefinitionId(sub.getWidgetId());
-                s.getTurns().add(new AssistantSession.Turn("assistant", "Approved " + title + " as v" + sub.getApprovedVersion()
-                        + ". It's in the library now - add it to a page from here or from Skills.", "approved", Instant.now()));
-            } else {
-                s.getTurns().add(new AssistantSession.Turn("assistant", (previous != null && previous.open() ? "Resubmitted " : "Sent ")
-                        + title + " for approval. You'll see the decision here and in Skills.", "submitted", Instant.now()));
-            }
+            s.getTurns().add(new AssistantSession.Turn("assistant", "Submitted \"" + sub.getTitle() + "\" for review. It stays in your "
+                    + "personal library until a Reviewer approves it for the global library.", "submitted", Instant.now()));
             s.setUpdatedAt(Instant.now());
             sessions.save(s);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("definitionId", d.getId());
+            out.put("review", library.get(d.getId()).reviewStatus());
             out.put("submission", workflow.item(sub));
             return out;
         });

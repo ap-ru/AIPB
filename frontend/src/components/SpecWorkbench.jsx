@@ -89,9 +89,11 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
     try {
       const saved = update ? await api.put('/api/widgets/library/' + encodeURIComponent(spec.id), body(spec))
         : await api.post('/api/widgets/library', body(spec));
-      // maker-checker: a Reviewer's save is approved at once and placed; a Builder's waits for approval
-      if (saved.status === 'approved') await onPlace(saved);
-      else setSent(`Sent “${saved.title}” for approval${update ? ` as a change to v${saved.baseVersion}` : ''}. It can be placed once a Reviewer approves it; follow it in the assistant's Skills window.`);
+      // maker-checker: a Builder's new widget goes to their personal library and is placed where only they see it;
+      // a Reviewer's is approved at once and placed for everyone; a change to a global widget waits for approval
+      if (saved.status === 'approved' || (saved.status === 'personal' && !update)) await onPlace(saved);
+      else if (saved.status === 'personal') setSent(`Updated “${saved.title}” in your personal library. Submit it for review from the Library tab or Skills.`);
+      else setSent(`Sent the change to “${saved.title}” for approval as v${(saved.baseVersion || 0) + 1}. Everyone keeps seeing the current version until it's approved.`);
     } catch (e) {
       if (e.status === 422 && e.body?.report) setReport(e.body.report);
       else if (e.status === 409) setExists(true);
@@ -116,8 +118,8 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
               ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Approve as new version & place</button>
               : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Approve to library & place</button>
             : exists
-              ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Submit as a change for approval</button>
-              : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Submit for approval</button>}
+              ? <button className="btn primary" onClick={() => save(true)} disabled={busy}>Save as a new version</button>
+              : <button className="btn primary" onClick={() => save(false)} disabled={busy || (report && !report.ok)}>Save to my library &amp; place</button>}
         </div>
       </div>
       <div className="stack" style={{ gap: 12, minWidth: 0 }}>

@@ -89,6 +89,7 @@ export default function WidgetFrame({ pageId, widget, children, bare }) {
           <div className="card-head">
             <h3>{widget.title}</h3>
             {by && <span className="by" title="Created by skill / agent">⚡ {by}</span>}
+            {widget.visibleTo && <span className="tag violet" title="Not approved yet: only you see it on this page until a Reviewer approves it">Only you · not approved yet</span>}
             {tools}
           </div>
           {editor}

@@ -1,6 +1,7 @@
 package com.aipb.widget;
 
 import com.aipb.identity.Actor;
+import com.aipb.service.LayoutService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -12,9 +13,10 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * Maker-checker for the widget library. A Builder's widget, or change to a widget, is a {@link WidgetSubmission} that
- * waits for a Reviewer; a Reviewer's own is approved as it is submitted. Nothing in a submission can be used before it
- * is approved.
+ * Maker-checker for the widget library. A Builder's new widget lives in their personal library - placed only on their own
+ * view of a page - and is shared ({@link #share}) as a {@link WidgetSubmission} that waits for a Reviewer; a change to a
+ * global widget is submitted ({@link #submit}) the same way. A Reviewer's own is approved as it is shared. Nothing goes
+ * live for anyone else before it is approved.
  * <pre>
  * submit -> pending -> approve            -> approved (the widget's next version, live on every page that places it)
  *                   -> feedback & revise  -> changes_requested -> resubmit -> pending
@@ -29,6 +31,7 @@ import java.util.*;
 public class WidgetWorkflow {
 
     private final WidgetLibrary library;
+    private final LayoutService layouts;
     private final WidgetSubmissionRepository submissions;
     private final WidgetSpecValidator validator;
     private final ApplicationEventPublisher events;
@@ -47,6 +50,41 @@ public class WidgetWorkflow {
     public record Decision(WidgetSubmission submission, String type, Actor actor, String comment) {}
 
     // ------------------------------------------------------------------ the flow
+    /**
+     * Shares a personal widget with the Reviewers: it stays personal (and visible only to its owner on the page) until
+     * approved. Sharing again after feedback & revise - or after changing it while it waits - resubmits the same review
+     * with the widget as it is now. A Reviewer's own widget is approved as it is shared.
+     */
+    public synchronized WidgetSubmission share(String widgetId, Actor actor, String note, String origin, String sessionId,
+                                               String layoutId, String pageId, Map<String, String> params) {
+        actor.requireAuthor();
+        WidgetDefinition d = library.get(widgetId, actor.id());
+        Optional<WidgetSubmission> open = openFor(widgetId);
+        if (open.isPresent()) {
+            if (!WidgetSubmission.PENDING.equals(d.reviewStatus())) library.submitForReview(widgetId, actor.id(), note);
+            return resubmit(open.get().getId(), library.spec(d), actor);
+        }
+        d = library.submitForReview(widgetId, actor.id(), note);
+        WidgetLibrary.Checked c = library.check(library.spec(d), 1, origin, layoutId, pageId, params);
+        WidgetSubmission s = new WidgetSubmission();
+        s.setId(UUID.randomUUID().toString());
+        s.setWidgetId(widgetId);
+        s.setOrigin(origin);
+        s.setSessionId(sessionId);
+        s.setLayoutId(layoutId == null ? "default" : layoutId);
+        s.setPageId(pageId);
+        if (params != null) s.setParams(new LinkedHashMap<>(params));
+        s.setSubmittedBy(actor.id());
+        s.setSubmittedByRole(actor.role().id());
+        s.setCreatedAt(Instant.now());
+        setSpec(s, c);
+        record(s, "submitted", actor, d.getReview().getNote());
+        submissions.save(s);
+        library.markReview(widgetId, "pending", s.getId());
+        events.publishEvent(new Decision(s, "submitted", actor, d.getReview().getNote()));
+        return actor.role().canReview() ? decideApprove(s, actor, null) : s;
+    }
+
     public synchronized WidgetSubmission submit(Submit req, Actor actor) {
         actor.requireAuthor();
         if (req.spec() == null || !req.spec().isObject()) throw new IllegalArgumentException("a widget spec is required");
@@ -100,6 +138,7 @@ public class WidgetWorkflow {
         s.setStatus(WidgetSubmission.PENDING);
         record(s, "resubmitted", actor, null);
         submissions.save(s);
+        library.markReview(s.getWidgetId(), "pending", s.getId());
         events.publishEvent(new Decision(s, "resubmitted", actor, null));
         return actor.role().canReview() ? decideApprove(s, actor, null) : s;
     }
@@ -118,6 +157,7 @@ public class WidgetWorkflow {
         WidgetSubmission s = get(submissionId);
         if (!WidgetSubmission.PENDING.equals(s.getStatus())) throw new Conflict("only a pending submission can get feedback; this one is " + label(s.getStatus()));
         s.setStatus(WidgetSubmission.CHANGES_REQUESTED);
+        library.markReview(s.getWidgetId(), "changes_requested", s.getId());
         return decide(s, "sent_back", actor, comment.trim());
     }
 
@@ -127,6 +167,9 @@ public class WidgetWorkflow {
         WidgetSubmission s = get(submissionId);
         if (!s.open()) throw new Conflict("this submission is " + label(s.getStatus()) + " already");
         s.setStatus(WidgetSubmission.REJECTED);
+        library.markReview(s.getWidgetId(), "rejected", s.getId());
+        // a rejected new widget can never go live: off every page; it stays in its Builder's personal library
+        if (s.getBaseVersion() == null) layouts.removePlacements(s.getWidgetId());
         return decide(s, "rejected", actor, reason.trim());
     }
 
@@ -144,9 +187,13 @@ public class WidgetWorkflow {
 
     private WidgetSubmission decideApprove(WidgetSubmission s, Actor actor, String comment) {
         // checked again: the data may have changed since it was submitted
-        int version = library.find(s.getWidgetId()).map(d -> d.getVersion() + 1).orElse(1);
+        WidgetDefinition current = library.find(s.getWidgetId()).orElse(null);
+        boolean wasPersonal = current != null && !current.global();
+        int version = current != null && current.global() ? current.getVersion() + 1 : 1;
         WidgetLibrary.Checked c = library.check(read(s.getSpec()), version, s.getOrigin(), s.getLayoutId(), s.getPageId(), s.getParams());
         library.publish(c, version, WidgetDefinition.BUILT, WidgetVersion.APPROVED, s.getId(), null, actor.role().id(), s.getSubmittedBy());
+        // a personal widget goes live: where its Builder placed it, everyone now sees it
+        if (wasPersonal) layouts.openPlacements(s.getWidgetId());
         s.setApprovedVersion(version);
         s.setSpec(c.spec().toString());
         s.setStatus(WidgetSubmission.APPROVED);
@@ -165,7 +212,7 @@ public class WidgetWorkflow {
         return submissions.findById(id).orElseThrow(() -> new NoSuchElementException("submission " + id));
     }
 
-    /** An id a new widget cannot take: in the library, or waiting for approval as another new widget. */
+    /** An id a new widget cannot take: in the library (global or someone's personal), or waiting for approval as another new widget. */
     public boolean idTaken(String id) {
         return library.exists(id) || openFor(id).isPresent();
     }
@@ -194,7 +241,11 @@ public class WidgetWorkflow {
             List<WidgetSubmission> mine = submissions.findByStatusIn(List.of(WidgetSubmission.PENDING, WidgetSubmission.CHANGES_REQUESTED,
                     WidgetSubmission.REJECTED)).stream().filter(s -> ownedBy(s, actor))
                     .sorted(Comparator.comparing(WidgetSubmission::getUpdatedAt).reversed()).toList();
-            sections.add(section("mine", "My widgets", mine.stream().map(this::item).toList()));
+            List<Map<String, Object>> items = new ArrayList<>(mine.stream().map(this::item).toList());
+            // personal widgets not shared yet (saved from the workbench): shareable from Skills or the Library tab
+            library.list(actor.id()).stream().filter(d -> !d.global() && "none".equals(d.reviewStatus()))
+                    .forEach(d -> items.add(item(d, null)));
+            sections.add(section("mine", "My widgets", items));
         }
         List<WidgetDefinition> all = library.list();
         sections.add(section("approved", "Approved", all.stream().filter(d -> !WidgetDefinition.STOCK.equals(d.getOrigin()))
@@ -250,7 +301,8 @@ public class WidgetWorkflow {
         m.put("title", d.getTitle());
         m.put("description", d.getDescription());
         m.put("primitive", d.getPrimitive());
-        m.put("status", "approved");
+        m.put("status", d.global() ? "approved" : "personal");
+        m.put("scope", d.global() ? WidgetDefinition.GLOBAL : WidgetDefinition.PERSONAL);
         m.put("version", d.getVersion());
         m.put("origin", d.getOrigin());
         m.put("params", d.getParams());

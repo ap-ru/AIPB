@@ -109,5 +109,7 @@ public class Layout {
         private int span = 12;       // grid columns out of 12
         private Map<String, Object> config = new LinkedHashMap<>();
         private String createdBy;    // "system" | "banker"
+        /** Set for a widget not approved yet: only this actor sees it on the page (see LayoutService.get(id, actorId)). */
+        private String visibleTo;
     }
 }

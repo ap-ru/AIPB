@@ -61,7 +61,7 @@ public class IntakeStage {
         StringBuilder sb = new StringBuilder();
         sb.append(context.page(s.getLayoutId(), s.getPageId(), s.getParams()));
         sb.append(context.dataToday());
-        sb.append(context.library());
+        sb.append(context.library(s.getOwner()));
         if (s.getModifies() != null) {
             sb.append("<modifying>\nThe banker is changing the library widget '").append(s.getModifies()).append("' (\"")
                     .append(s.getModifiesTitle()).append("\", v").append(s.getModifiesVersion()).append("). Treat every request as a ")
@@ -118,7 +118,7 @@ public class IntakeStage {
         switch (outcome) {
             case "reuse" -> {
                 String id = out.path("reuseDefinitionId").asText("");
-                if (!library.existsById(id)) errors.add("reuseDefinitionId '" + id + "' is not in the library; reuse only a listed widget, or choose another outcome");
+                if (!library.findById(id).map(d -> d.visibleTo(s.getOwner())).orElse(false)) errors.add("reuseDefinitionId '" + id + "' is not in the library; reuse only a listed widget, or choose another outcome");
                 else if (id.equals(s.getModifies())) errors.add("'" + id + "' is the widget being changed; return its revised brief (proceed) instead of reusing it");
             }
             case "proceed" -> {

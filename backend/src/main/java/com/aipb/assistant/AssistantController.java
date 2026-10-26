@@ -36,7 +36,8 @@ public class AssistantController {
     /** {@code modifies}: a library widget id, to start a conversation that changes it. */
     public record CreateRequest(String layoutId, String pageId, Map<String, String> params, String modifies) {}
     public record MessageRequest(String text, Map<String, String> params) {}
-    public record ApproveRequest(Boolean confirmUnverified) {}
+    public record ApproveRequest(Boolean confirmUnverified, String note) {}
+    public record SubmitRequest(String note) {}
 
     @GetMapping("/status")
     public Map<String, Object> status(Actor actor) {
@@ -70,11 +71,21 @@ public class AssistantController {
         return stream(events -> orchestrator.verify(id, events));
     }
 
-    /** Sends the proposal for approval (a Reviewer's is approved), or places a widget reused from the library. */
-    @PostMapping("/sessions/{id}/submit")
-    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) ApproveRequest req, Actor actor) {
+    /**
+     * Add & share: saves the new widget to the actor's personal library, places it where only they see it, and shares it
+     * for review (a Reviewer's is approved and goes live); or places a widget reused from the library.
+     */
+    @PostMapping("/sessions/{id}/approve")
+    public Map<String, Object> approve(@PathVariable String id, @RequestBody(required = false) ApproveRequest req, Actor actor) {
         owned(id, actor);
-        return orchestrator.submit(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()), actor);
+        return orchestrator.approve(id, req != null && Boolean.TRUE.equals(req.confirmUnverified()), req == null ? null : req.note(), actor);
+    }
+
+    /** Submits the widget the conversation added to the global library, for a Reviewer to approve. */
+    @PostMapping("/sessions/{id}/submit")
+    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) SubmitRequest req, Actor actor) {
+        owned(id, actor);
+        return orchestrator.submit(id, req == null ? null : req.note(), actor);
     }
 
     /** The inspector: every stage run with its model, effort, tokens, cost, tool calls and context manifest. */

@@ -25,50 +25,71 @@ public class WidgetController {
     /** A spec plus where it is meant to go: the page decides which parameters exist; params are sample values. */
     public record SpecRequest(JsonNode spec, String layoutId, String pageId, Map<String, String> params) {}
 
+    public record SubmitRequest(String note) {}
+
+    /** The global library plus the actor's personal widgets. */
     @GetMapping("/library")
-    public List<Map<String, Object>> list() {
-        return library.list().stream().map(WidgetController::summary).toList();
+    public List<Map<String, Object>> list(Actor actor) {
+        return library.list(actor.id()).stream().map(WidgetController::summary).toList();
     }
 
     @GetMapping("/library/{id}")
-    public Map<String, Object> get(@PathVariable String id) {
-        WidgetDefinition d = library.get(id);
+    public Map<String, Object> get(@PathVariable String id, Actor actor) {
+        WidgetDefinition d = library.get(id, actor.id());
         Map<String, Object> m = summary(d);
         m.put("spec", library.spec(d));
         return m;
     }
 
-    /** A new widget from the workbench: a Builder's waits for approval; a Reviewer's is approved as it is saved. */
+    /**
+     * A new widget from the workbench. A Builder's goes to their personal library (they can place it; only they see it
+     * until it is approved; Submit for review shares it). A Reviewer's is approved as it is saved.
+     */
     @PostMapping("/library")
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> create(@RequestBody SpecRequest req, Actor actor) {
-        Optional<WidgetSubmission> open = resubmittable(required(req).path("id").asText());
-        if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), actor));
-        return submitted(workflow.submit(new WidgetWorkflow.Submit(required(req), "workbench", null, req.layoutId(), req.pageId(),
-                req.params(), null), actor));
+        actor.requireAuthor();
+        if (actor.role().canReview())
+            return submitted(workflow.submit(new WidgetWorkflow.Submit(required(req), "workbench", null, req.layoutId(), req.pageId(),
+                    req.params(), null), actor));
+        WidgetLibrary.Saved s = library.create(required(req), "workbench", actor.id(), WidgetDefinition.PERSONAL,
+                req.layoutId(), req.pageId(), req.params());
+        return saved(s);
     }
 
-    /** A workbench widget waiting for approval (or sent back) is revised by submitting its id again. */
-    private Optional<WidgetSubmission> resubmittable(String id) {
-        return workflow.openFor(id).filter(s -> "workbench".equals(s.getOrigin()));
-    }
-
-    /** A change to a library widget from the workbench, submitted as its next version. */
+    /**
+     * A new version of a definition: the actor's own personal widget is revised in place (share it again for review);
+     * a change to a global widget is submitted for approval as its next version.
+     */
     @PutMapping("/library/{id}")
-    public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req,
-                                      Actor actor) {
+    public Map<String, Object> update(@PathVariable String id, @RequestBody SpecRequest req, Actor actor) {
+        actor.requireAuthor();
         if (!id.equals(required(req).path("id").asText()))
             throw new IllegalArgumentException("spec id '" + req.spec().path("id").asText() + "' does not match '" + id + "'");
-        Optional<WidgetSubmission> open = resubmittable(id);
+        WidgetDefinition current = library.get(id, actor.id());
+        if (!current.global())
+            return saved(library.update(id, req.spec(), "workbench", actor.id(), req.layoutId(), req.pageId(), req.params()));
+        Optional<WidgetSubmission> open = workflow.openFor(id).filter(s -> "workbench".equals(s.getOrigin()));
         if (open.isPresent()) return submitted(workflow.resubmit(open.get().getId(), req.spec(), actor));
         return submitted(workflow.submit(new WidgetWorkflow.Submit(req.spec(), "workbench", null, req.layoutId(), req.pageId(),
                 req.params(), id), actor));
     }
 
+    /** Asks for one of the actor's personal widgets to be published to the global library: it goes to the Reviewers. */
+    @PostMapping("/library/{id}/submit")
+    public Map<String, Object> submit(@PathVariable String id, @RequestBody(required = false) SubmitRequest req, Actor actor) {
+        actor.requireAuthor();
+        WidgetDefinition d = library.get(id, actor.id());
+        JsonNode spec = library.spec(d);
+        workflow.share(id, actor, req == null ? null : req.note(), d.getAuthor() == null ? "workbench" : d.getAuthor(), null,
+                "default", null, library.sampleParams(spec));
+        return summary(library.get(id));
+    }
+
     /** A live preview of a library widget outside a page: request values (e.g. clientId) over its sample values. */
     @GetMapping("/library/{id}/preview")
-    public Map<String, Object> preview(@PathVariable String id, @RequestParam Map<String, String> params) {
-        WidgetDefinition d = library.get(id);
+    public Map<String, Object> preview(@PathVariable String id, @RequestParam Map<String, String> params, Actor actor) {
+        WidgetDefinition d = library.get(id, actor.id());
         return preview(library.spec(d), workflow.preview(library.spec(d), null, null, params));
     }
 
@@ -147,6 +168,14 @@ public class WidgetController {
         return req.spec();
     }
 
+    /** A personal save: the definition and its validation report. */
+    private Map<String, Object> saved(WidgetLibrary.Saved s) {
+        Map<String, Object> m = summary(s.definition());
+        m.put("status", s.definition().global() ? "approved" : "personal");
+        m.put("report", s.report());
+        return m;
+    }
+
     /** A workbench save: the submission, and - when it was approved at once - the widget it became. */
     private Map<String, Object> submitted(WidgetSubmission s) {
         Map<String, Object> m = workflow.item(s);
@@ -188,6 +217,8 @@ public class WidgetController {
         m.put("version", d.getVersion());
         m.put("origin", d.getOrigin());
         m.put("owner", d.getOwner());
+        m.put("scope", d.global() ? WidgetDefinition.GLOBAL : WidgetDefinition.PERSONAL);
+        m.put("review", d.reviewStatus());
         m.put("title", d.getTitle());
         m.put("description", d.getDescription());
         m.put("primitive", d.getPrimitive());

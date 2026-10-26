@@ -2,6 +2,7 @@ package com.aipb.widget;
 
 import com.aipb.identity.Actor;
 import com.aipb.identity.Role;
+import com.aipb.service.LayoutService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -25,6 +26,7 @@ class WidgetWorkflowTest {
     private final List<WidgetWorkflow.Decision> decisions = new ArrayList<>();
     private WidgetLibrary library;
     private WidgetWorkflow workflow;
+    private LayoutService layouts;
     private static final Actor BUILDER = Actor.of(Role.BUILDER);
     private static final Actor REVIEWER = Actor.of(Role.REVIEWER);
     private static final Actor BANKER = Actor.of(Role.BANKER);
@@ -58,11 +60,25 @@ class WidgetWorkflowTest {
             d.setTitle(c.parsed().title());
             d.setVersion(i.getArgument(1));
             if (d.getOrigin() == null) d.setOrigin(i.getArgument(2));
+            d.setScope(WidgetDefinition.GLOBAL);
             widgets.put(d.getId(), d);
             return d;
         });
         ApplicationEventPublisher events = e -> decisions.add((WidgetWorkflow.Decision) e);
-        workflow = new WidgetWorkflow(library, submissions, mock(WidgetSpecValidator.class), events, mapper);
+        layouts = mock(LayoutService.class);
+        when(library.get(anyString(), anyString())).thenAnswer(i -> Optional.ofNullable(widgets.get((String) i.getArgument(0)))
+                .filter(d -> d.visibleTo(i.getArgument(1))).orElseThrow(() -> new NoSuchElementException("widget " + i.getArgument(0))));
+        when(library.spec(any(WidgetDefinition.class))).thenAnswer(i -> spec(((WidgetDefinition) i.getArgument(0)).getId(), "Personal"));
+        when(library.submitForReview(anyString(), anyString(), any())).thenAnswer(i -> {
+            WidgetDefinition d = widgets.get((String) i.getArgument(0));
+            WidgetDefinition.Review r = new WidgetDefinition.Review();
+            r.setStatus("pending");
+            r.setSubmittedBy(i.getArgument(1));
+            r.setNote(i.getArgument(2));
+            d.setReview(r);
+            return d;
+        });
+        workflow = new WidgetWorkflow(library, layouts, submissions, mock(WidgetSpecValidator.class), events, mapper);
     }
 
     private JsonNode spec(String id, String title) {
@@ -85,6 +101,62 @@ class WidgetWorkflowTest {
         d.setVersion(version);
         d.setOrigin(WidgetDefinition.STOCK);
         widgets.put(id, d);
+    }
+
+    private void personal(String id, String owner) {
+        WidgetDefinition d = new WidgetDefinition();
+        d.setId(id);
+        d.setTitle("Personal " + id);
+        d.setOwner(owner);
+        d.setScope(WidgetDefinition.PERSONAL);
+        widgets.put(id, d);
+    }
+
+    @Test
+    void sharingAPersonalWidgetWaitsForReviewAndApprovalTakesItLiveWhereItWasPlaced() {
+        personal("mine", "demo-builder");
+        WidgetSubmission s = workflow.share("mine", BUILDER, "checked against the finance pack", "assistant", "session-1", "default", "client", Map.of());
+        assertThat(s.getStatus()).isEqualTo(WidgetSubmission.PENDING);
+        assertThat(s.getBaseVersion()).isNull();
+        assertThat(s.getHistory().get(0).getComment()).isEqualTo("checked against the finance pack");
+        verify(library).markReview("mine", "pending", s.getId());
+        verify(layouts, never()).openPlacements(any());
+
+        workflow.approve(s.getId(), REVIEWER, null);
+        verify(library).publish(any(), eq(1), eq(WidgetDefinition.BUILT), eq(WidgetVersion.APPROVED), eq(s.getId()), isNull(), eq("reviewer"), eq("demo-builder"));
+        verify(layouts).openPlacements("mine");   // the Builder's personal placement is now live for everyone
+        assertThat(widgets.get("mine").global()).isTrue();
+    }
+
+    @Test
+    void aRejectedPersonalWidgetComesOffEveryPageAndStaysPersonal() {
+        personal("mine", "demo-builder");
+        WidgetSubmission s = workflow.share("mine", BUILDER, null, "assistant", null, "default", "client", Map.of());
+        workflow.reject(s.getId(), REVIEWER, "Duplicates an existing widget");
+        verify(layouts).removePlacements("mine");
+        verify(library).markReview("mine", "rejected", s.getId());
+        verify(library, never()).publish(any(), anyInt(), any(), any(), any(), any(), any(), any());
+        assertThat(widgets.get("mine").global()).isFalse();
+    }
+
+    @Test
+    void afterFeedbackSharingAgainResubmitsTheSameReview() {
+        personal("mine", "demo-builder");
+        WidgetSubmission s = workflow.share("mine", BUILDER, null, "assistant", null, "default", "client", Map.of());
+        workflow.sendBack(s.getId(), REVIEWER, "Use 12 months");
+        verify(library).markReview("mine", "changes_requested", s.getId());
+        widgets.get("mine").getReview().setStatus("changes_requested");
+        WidgetSubmission again = workflow.share("mine", BUILDER, null, "assistant", null, "default", "client", Map.of());
+        assertThat(again.getId()).isEqualTo(s.getId());
+        assertThat(again.getStatus()).isEqualTo(WidgetSubmission.PENDING);
+        assertThat(again.getHistory()).extracting(WidgetSubmission.Event::getType).containsExactly("submitted", "sent_back", "resubmitted");
+    }
+
+    @Test
+    void someoneElsesPersonalWidgetCannotBeShared() {
+        personal("theirs", "demo-reviewer");
+        assertThatThrownBy(() -> workflow.share("theirs", BUILDER, null, "assistant", null, "default", "client", Map.of()))
+                .isInstanceOf(NoSuchElementException.class);
     }
 
     @Test
