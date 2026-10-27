@@ -3,6 +3,8 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { usePlatform } from './lib/platform.jsx';
 import DynamicPage from './pages/DynamicPage.jsx';
 import Client360Page from './pages/Client360Page.jsx';
+import { NewIssuePage, NewIssueSearchPage, TransactionDetailsPage } from './pages/NewIssuePage.jsx';
+import SignalsPage from './pages/SignalsPage.jsx';
 import Icon from './components/Icon.jsx';
 
 /** Demo role switcher: no sign-in yet, so whoever is at the screen picks who the app acts as. */
@@ -38,11 +40,13 @@ function Sidebar() {
         <small>AI Powered Banker · Commercial</small>
       </div>
       <nav className="nav">
-        <div className="nav-section">Commercial bank</div>
+        <div className="nav-section">CM&amp;A Workspace</div>
         {error && <div className="error-box">API unreachable</div>}
+        <NavLink to="/new-issue" title={assistantOpen ? 'New Issue' : undefined}><Icon name="layers" /><span className="nav-label">New Issue</span></NavLink>
         {(layout ? layout.pages : []).map((p) => (
           <NavLink key={p.id} to={'/page/' + p.id} title={assistantOpen ? p.title : undefined}><Icon name={p.icon} /><span className="nav-label">{p.title}</span></NavLink>
         ))}
+        <NavLink to="/signals" title={assistantOpen ? 'Signals' : undefined}><Icon name="pulse" /><span className="nav-label">Signals</span></NavLink>
       </nav>
       <div className="sidebar-foot">
         <RolePicker />
@@ -73,6 +77,10 @@ export default function App() {
           <Route path="/" element={<Navigate to="/page/command-center" replace />} />
           <Route path="/page/:pageId" element={<DynamicPage />} />
           <Route path="/clients/:clientId" element={<Client360Page />} />
+          <Route path="/new-issue" element={<NewIssuePage />} />
+          <Route path="/new-issue/search" element={<NewIssueSearchPage />} />
+          <Route path="/new-issue/deals/:dealId" element={<TransactionDetailsPage />} />
+          <Route path="/signals" element={<SignalsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

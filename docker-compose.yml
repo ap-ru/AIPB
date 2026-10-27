@@ -41,6 +41,22 @@ services:
       mongo:
         condition: service_healthy
 
+  # One-shot: adds the High Yield new-issue collections (hy_*) to `bank`; touches nothing else (HY_RESET=true regenerates).
+  hy-seed:
+    image: mongo:7
+    container_name: aipb-hy-seed
+    restart: "no"
+    environment:
+      SEED_DIR: /seed
+      HY_RESET: ${HY_RESET:-false}
+      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD}
+    volumes:
+      - ./data:/seed:ro
+    command: ["sh", "-c", "exec mongosh \"mongodb://bank_writer:$${BANK_WRITER_PASSWORD}@mongo:27017/bank?authSource=bank\" --quiet /seed/generate-hy.js"]
+    depends_on:
+      bank-seed:
+        condition: service_completed_successfully
+
   # MongoDB MCP server: read-only access to the `bank` source data for the assistant exploring data while it designs a
   # widget, and for Claude Code via .mcp.json. Pages do not use it: the backend reads widget data with the driver.
   mcp:
