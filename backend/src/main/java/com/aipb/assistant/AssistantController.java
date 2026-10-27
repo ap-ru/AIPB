@@ -2,6 +2,7 @@ package com.aipb.assistant;
 
 import com.aipb.assistant.llm.LlmGateway;
 import com.aipb.identity.Actor;
+import com.aipb.skills.SkillTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +34,8 @@ public class AssistantController {
     private final ObjectMapper mapper;
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
-    public record CreateRequest(String layoutId, String pageId, Map<String, String> params) {}
+    /** {@code templateId}: the Skills Studio template to build from (null: Custom widget); {@code inputs}: its form values. */
+    public record CreateRequest(String layoutId, String pageId, Map<String, String> params, String templateId, Map<String, String> inputs) {}
     public record MessageRequest(String text, Map<String, String> params) {}
     public record ApproveRequest(Boolean confirmUnverified) {}
     public record SubmitRequest(String note) {}
@@ -47,7 +49,7 @@ public class AssistantController {
     public Map<String, Object> create(@RequestBody CreateRequest req, Actor actor) {
         actor.requireAuthor();
         if (req == null || req.pageId() == null) throw new IllegalArgumentException("pageId is required");
-        return view(orchestrator.create(req.layoutId(), req.pageId(), req.params(), actor.id()));
+        return view(orchestrator.create(req.layoutId(), req.pageId(), req.params(), actor.id(), req.templateId(), req.inputs()));
     }
 
     @GetMapping("/sessions/{id}")
@@ -110,12 +112,23 @@ public class AssistantController {
         return emitter;
     }
 
-    /** The session as the UI needs it: turns, status, and the proposal as JSON. */
+    /** The session as the UI needs it: its template and stages, turns, status, and the proposal as JSON. */
     private Map<String, Object> view(AssistantSession s) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", s.getId());
         m.put("pageId", s.getPageId());
         m.put("params", s.getParams());
+        SkillTemplate t = orchestrator.template(s);
+        Map<String, Object> template = new LinkedHashMap<>();
+        template.put("id", t.id());
+        template.put("version", t.version());
+        template.put("kind", t.kind());
+        template.put("title", t.title());
+        template.put("icon", t.icon());
+        template.put("suggestions", t.suggestions());
+        m.put("template", template);
+        m.put("inputs", s.getInputs());
+        m.put("stages", orchestrator.stageLabels(s));
         m.put("status", s.getStatus());
         m.put("stage", s.getStage());
         m.put("reviewState", s.getReviewState());

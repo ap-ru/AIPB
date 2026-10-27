@@ -2,6 +2,7 @@ package com.aipb.assistant;
 
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
+import com.aipb.skills.SkillTemplate;
 import com.aipb.source.SourceData;
 import com.aipb.widget.WidgetDataService;
 import com.aipb.widget.WidgetDefinition;
@@ -65,33 +66,82 @@ public class ContextAssembler {
     }
 
     // ------------------------------------------------------------------ static context, per stage
-    public List<Block> intakeSystem() {
+    public List<Block> intakeSystem() { return intakeSystem(null); }
+
+    public List<Block> buildSystem() { return buildSystem(null); }
+
+    public List<Block> reviewSystem() { return reviewSystem(null); }
+
+    public List<Block> presentSystem() { return presentSystem(null); }
+
+    /**
+     * The stage's static blocks for a run guided by {@code template} (null: none). The template's guidance comes last,
+     * so the shared prefix stays cached across templates; a template that is silent on a stage (Custom widget) leaves
+     * the blocks exactly as without one.
+     */
+    public List<Block> intakeSystem(SkillTemplate template) {
         JsonNode c = catalog();
-        return List.of(primer(), stage("intake"),
+        return withTemplate("intake", template, primer(), stage("intake"),
                 new Block("data-overview", "_catalog/_database", CatalogRenderer.overview(c)),
                 new Block("data-index", "_catalog (generated)", CatalogRenderer.index(c)),
                 new Block("primitive-menu", "widgets/primitives.json", primitiveMenu()));
     }
 
-    public List<Block> buildSystem() {
+    public List<Block> buildSystem(SkillTemplate template) {
         JsonNode c = catalog();
-        return List.of(primer(), stage("build"),
+        List<String> examples = examples(template, "build", BUILD_EXAMPLES);
+        return withTemplate("build", template, primer(), stage("build"),
                 new Block("data-overview", "_catalog/_database", CatalogRenderer.overview(c)),
                 new Block("data-dictionary", "_catalog (generated)", CatalogRenderer.dictionary(c)),
-                new Block("build-examples", "assistant/examples " + BUILD_EXAMPLES, buildExamples()));
+                new Block("build-examples", "assistant/examples " + examples, buildExamples(examples)));
     }
 
-    public List<Block> reviewSystem() {
+    public List<Block> reviewSystem(SkillTemplate template) {
         JsonNode c = catalog();
-        return List.of(primer(), stage("review"),
+        return withTemplate("review", template, primer(), stage("review"),
                 new Block("data-overview", "_catalog/_database", CatalogRenderer.overview(c)),
                 new Block("data-dictionary", "_catalog (generated)", CatalogRenderer.dictionary(c)));
     }
 
-    public List<Block> presentSystem() {
-        return List.of(primer(), stage("present"),
+    public List<Block> presentSystem(SkillTemplate template) {
+        List<String> examples = examples(template, "present", PRESENT_EXAMPLES);
+        return withTemplate("present", template, primer(), stage("present"),
                 new Block("design-catalog", "widgets/primitives.json", designCatalog()),
-                new Block("present-examples", "assistant/examples " + PRESENT_EXAMPLES, presentExamples()));
+                new Block("present-examples", "assistant/examples " + examples, presentExamples(examples)));
+    }
+
+    private static List<String> examples(SkillTemplate t, String stage, List<String> defaults) {
+        List<String> ids = t == null ? null : t.examples(stage);
+        return ids == null ? defaults : ids;
+    }
+
+    private List<Block> withTemplate(String stage, SkillTemplate t, Block... blocks) {
+        List<Block> out = new ArrayList<>(List.of(blocks));
+        if (t != null && !t.silentOn(stage))
+            out.add(new Block("template-guidance", "skills/templates/" + t.id() + ".json@v" + t.version(), templateGuidance(t, stage)));
+        return List.copyOf(out);
+    }
+
+    /** The template's part of a stage's system prompt: what the run is for, this stage's guidance and the constraints. */
+    static String templateGuidance(SkillTemplate t, String stage) {
+        StringBuilder sb = new StringBuilder("# Skill template: ").append(t.title()).append("\n\n")
+                .append("The banker chose this template in the Skills Studio. It sets what this run builds; follow it over the general defaults above.\n\n")
+                .append(t.summary()).append('\n');
+        if (t.guidance(stage) != null) sb.append("\n## For this step\n").append(t.guidance(stage).strip()).append('\n');
+        if ("intake".equals(stage))
+            sb.append("\n## Requests outside this template\nIf the banker asks for something this template does not build, choose `redirect`: set ")
+                    .append("`suggestedTemplateId` to the best fit from <other_templates> (custom-widget builds anything free-form) and say in one ")
+                    .append("line why it fits better. Use `decline` only when nothing in AIPB can do it.\n");
+        SkillTemplate.Constraints c = t.constraints();
+        if (!c.isEmpty()) {
+            sb.append("\n## Constraints (checked automatically)\n");
+            if (c.scope() != null) sb.append("- scope: ").append(c.scope()).append(" only\n");
+            if (!c.collections().isEmpty()) sb.append("- source collections: ").append(String.join(", ", c.collections())).append('\n');
+            if (!c.primitives().isEmpty()) sb.append("- display primitives: ").append(String.join(", ", c.primitives())).append('\n');
+            if (c.maxRows() != null) sb.append("- at most ").append(c.maxRows()).append(" result rows\n");
+            if (!c.handlers().isEmpty()) sb.append("- action handlers: ").append(String.join(", ", c.handlers())).append('\n');
+        }
+        return sb.toString();
     }
 
     // ------------------------------------------------------------------ dynamic context
@@ -140,9 +190,12 @@ public class ContextAssembler {
     }
 
     /** The widget library the session's owner can see (global plus their personal widgets), so the assistant can reuse rather than duplicate. */
-    public String library(String ownerId) {
+    public String library(String ownerId) { return library(ownerId, WidgetDefinition.WIDGET); }
+
+    /** As {@link #library(String)}, limited to one kind of skill: only those can be offered for reuse. */
+    public String library(String ownerId, String kind) {
         StringBuilder sb = new StringBuilder("<library>\n");
-        List<WidgetDefinition> defs = new ArrayList<>(library.findAll().stream().filter(d -> d.visibleTo(ownerId)).toList());
+        List<WidgetDefinition> defs = new ArrayList<>(library.findAll().stream().filter(d -> d.visibleTo(ownerId) && d.kind().equals(kind)).toList());
         defs.sort(Comparator.comparing(WidgetDefinition::getId));
         for (WidgetDefinition d : defs) {
             sb.append("- ").append(d.getId()).append(": \"").append(d.getTitle()).append("\" (").append(d.getPrimitive())
@@ -221,10 +274,10 @@ public class ContextAssembler {
         return sb.toString();
     }
 
-    private String buildExamples() {
+    private String buildExamples(List<String> ids) {
         StringBuilder sb = new StringBuilder("# Worked examples\n\nData definitions of existing, verified widgets. "
                 + "They show the conventions; build what your brief asks, not these.\n");
-        for (String id : BUILD_EXAMPLES) {
+        for (String id : ids) {
             JsonNode s = starter(id);
             ObjectNode data = mapper.createObjectNode();
             data.set("params", s.path("params"));
@@ -237,9 +290,9 @@ public class ContextAssembler {
         return sb.toString();
     }
 
-    private String presentExamples() {
+    private String presentExamples(List<String> ids) {
         StringBuilder sb = new StringBuilder("# Worked examples\n\nHow existing widgets display their data.\n");
-        for (String id : PRESENT_EXAMPLES) {
+        for (String id : ids) {
             JsonNode s = starter(id);
             ObjectNode cols = mapper.createObjectNode();
             s.path("data").path("columns").forEach(c -> cols.put(c.path("name").asText(),

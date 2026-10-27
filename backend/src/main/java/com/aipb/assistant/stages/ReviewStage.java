@@ -5,6 +5,7 @@ import com.aipb.assistant.AssistantTools;
 import com.aipb.assistant.ContextAssembler;
 import com.aipb.assistant.gates.ReviewGate;
 import com.aipb.assistant.llm.LlmReply;
+import com.aipb.skills.SkillTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -32,8 +33,9 @@ public class ReviewStage {
     /** The submitted review and whether it passed. */
     public record Result(JsonNode review, boolean passed) {}
 
-    public Result run(JsonNode brief, JsonNode artifact, AssistantTools.Context ctx, RunRecorder rec, Instant deadline, AssistantEvents events) {
-        List<ContextAssembler.Block> system = context.reviewSystem();
+    public Result run(JsonNode brief, JsonNode artifact, AssistantTools.Context ctx, SkillTemplate template, RunRecorder rec, Instant deadline,
+                      AssistantEvents events) {
+        List<ContextAssembler.Block> system = context.reviewSystem(template);
         String user = userContext(brief, artifact, ctx);
         rec.context(context.manifest(system, user), user);
         JsonNode[] review = new JsonNode[1];

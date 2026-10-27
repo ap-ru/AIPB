@@ -6,7 +6,8 @@
     "message",
     "brief",
     "reuseDefinitionId",
-    "changed"
+    "changed",
+    "suggestedTemplateId"
   ],
   "properties": {
     "outcome": {
@@ -16,14 +17,15 @@
         "answer",
         "reuse",
         "decline",
-        "verify"
+        "verify",
+        "redirect"
       ],
-      "description": "proceed = build the widget in brief; clarify = ask one question first; answer = reply to a question about the data without building; reuse = an existing library widget already answers it; decline = cannot or should not be built (say why); verify = the banker asks to double-check the current proposal.",
+      "description": "proceed = build the widget in brief; clarify = ask one question first; answer = reply to a question about the data without building; reuse = an existing library widget already answers it; decline = cannot or should not be built (say why); verify = the banker asks to double-check the current proposal. redirect = the request is outside the chosen skill template; suggest the template that fits.",
       "type": "string"
     },
     "message": {
       "type": "string",
-      "description": "What to tell the banker: the question (clarify), the answer (answer), what already exists (reuse), why not (decline), or a one-line acknowledgement (proceed/verify)."
+      "description": "What to tell the banker: the question (clarify), the answer (answer), what already exists (reuse), why not (decline), why another template fits (redirect), or a one-line acknowledgement (proceed/verify)."
     },
     "brief": {
       "anyOf": [
@@ -192,6 +194,10 @@
           "type": "null"
         }
       ]
+    },
+    "suggestedTemplateId": {
+      "type": "string",
+      "description": "For redirect: the id of a template listed in <other_templates>. \"\" for every other outcome."
     },
     "changed": {
       "type": "array",

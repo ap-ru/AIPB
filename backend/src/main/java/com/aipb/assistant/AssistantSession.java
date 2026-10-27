@@ -13,7 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * One widget-assistant conversation on a page (aipb.assistant_sessions). Holds the banker's turns, the artifacts
+ * One assistant conversation on a page (aipb.assistant_sessions), building one kind of skill from one Skills Studio
+ * template (null template: Custom widget - started before templates existed). Holds the banker's turns, the artifacts
  * each stage produced (brief, data, view, spec, proposal, review - stored as JSON text because pipelines are full of
  * $-prefixed keys), and an audit of every stage run: model, effort, tokens, tool calls and the manifest of exactly
  * what context the model was given.
@@ -37,6 +38,10 @@ public class AssistantSession {
     private String pageId;
     /** The page's parameter values when the latest message was sent (e.g. the selected clientId) - the sample values. */
     private Map<String, String> params = new LinkedHashMap<>();
+    private String templateId;            // the Skills Studio template guiding the run
+    private Integer templateVersion;
+    private String kind;                  // the skill kind being built (the template's)
+    private Map<String, String> inputs = new LinkedHashMap<>(); // the banker's answers to the template's inputs
     private String status = AWAITING_USER;
     private String stage;
     private List<Turn> turns = new ArrayList<>();
@@ -59,8 +64,11 @@ public class AssistantSession {
     public static class Turn {
         private String role;   // user | assistant
         private String text;
-        private String kind;   // message | clarify | answer | decline | reuse | proposal | error
+        private String kind;   // message | clarify | answer | decline | redirect | reuse | proposal | error
         private Instant at;
+        private String templateId; // redirect: the template suggested instead
+
+        public Turn(String role, String text, String kind, Instant at) { this(role, text, kind, at, null); }
     }
 
     @Data @NoArgsConstructor

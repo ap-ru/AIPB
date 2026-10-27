@@ -4,6 +4,9 @@ import com.aipb.assistant.llm.LlmRequest;
 import com.aipb.assistant.stages.*;
 import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
+import com.aipb.skills.SkillTemplate;
+import com.aipb.skills.SkillTemplateRegistry;
+import com.aipb.skills.WidgetSkill;
 import com.aipb.source.SourceData;
 import com.aipb.widget.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -79,6 +82,42 @@ class ContextAssemblyTest {
     }
 
     @Test
+    void theCustomWidgetTemplateLeavesEveryStagePromptExactlyAsBefore() {
+        SkillTemplate custom = templates().get(SkillTemplate.CUSTOM_WIDGET);
+        assertThat(ContextAssembler.texts(context.intakeSystem(custom))).isEqualTo(ContextAssembler.texts(context.intakeSystem()));
+        assertThat(ContextAssembler.texts(context.buildSystem(custom))).isEqualTo(ContextAssembler.texts(context.buildSystem()));
+        assertThat(ContextAssembler.texts(context.reviewSystem(custom))).isEqualTo(ContextAssembler.texts(context.reviewSystem()));
+        assertThat(ContextAssembler.texts(context.presentSystem(custom))).isEqualTo(ContextAssembler.texts(context.presentSystem()));
+    }
+
+    @Test
+    void aTemplateAppendsOneGuidanceBlockAfterTheSharedPrefixAndCanSwapTheExamples() {
+        SkillTemplate exposure = templates().get("exposure-vs-limit");
+        List<ContextAssembler.Block> plain = context.intakeSystem();
+        List<ContextAssembler.Block> guided = context.intakeSystem(exposure);
+        assertThat(guided).hasSize(plain.size() + 1);
+        assertThat(guided.subList(0, plain.size())).isEqualTo(plain); // the cached prefix is shared across templates
+        ContextAssembler.Block last = guided.get(guided.size() - 1);
+        assertThat(last.name()).isEqualTo("template-guidance");
+        assertThat(last.source()).isEqualTo("skills/templates/exposure-vs-limit.json@v1");
+        assertThat(last.text()).contains("# Skill template: Exposure vs. limit", "## For this step", "scope: client only",
+                "source collections: holdings", "display primitives: meter, bar, metric", "at most 25 result rows");
+        // the template's worked examples replace the defaults
+        String build = String.join("\n", ContextAssembler.texts(context.buildSystem(exposure)));
+        assertThat(context.buildSystem(exposure).get(4).source()).isEqualTo("assistant/examples [client-exposure, client-covenants]");
+        assertThat(build).contains("## Credit exposure").doesNotContain("## Revenue YTD");
+        // and the manifest records which template version the model saw
+        assertThat(context.manifest(guided, null)).extracting(ContextAssembler.ManifestEntry::source).contains("skills/templates/exposure-vs-limit.json@v1");
+    }
+
+    private SkillTemplateRegistry templates() {
+        WidgetSkill widget = mock(WidgetSkill.class);
+        when(widget.id()).thenReturn("widget");
+        when(widget.stageLabels()).thenReturn(Map.of("build", "", "review", "", "present", ""));
+        return new SkillTemplateRegistry(List.of(widget), new WidgetPrimitives(mapper), mapper);
+    }
+
+    @Test
     void theDictionaryCoversEveryCollectionFieldAndDerivedMetric() {
         String dict = CatalogRenderer.dictionary(catalog);
         String index = CatalogRenderer.index(catalog);
@@ -133,9 +172,9 @@ class ContextAssemblyTest {
         s.setParams(Map.of("clientId", "CL-0002"));
         s.getTurns().add(new AssistantSession.Turn("user", "Show me revenue by quarter", "message", Instant.now()));
 
-        IntakeStage intake = new IntakeStage(null, context, mock(WidgetDefinitionRepository.class), mock(LayoutService.class), mapper);
-        BuildStage build = new BuildStage(null, context, tools, null);
-        PresentStage present = new PresentStage(null, context, null, new AssistantProperties(), mapper);
+        IntakeStage intake = new IntakeStage(null, context, mock(WidgetDefinitionRepository.class), mock(LayoutService.class), null, mapper);
+        BuildStage build = new BuildStage(null, context, tools, null, null);
+        PresentStage present = new PresentStage(null, context, null, null, new AssistantProperties(), mapper);
         ReviewStage review = new ReviewStage(null, context, tools, null);
 
         Map<String, Integer> budgets = Map.of("intake", 6_000, "build", 13_000, "present", 5_000, "review", 11_000);

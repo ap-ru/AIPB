@@ -76,9 +76,15 @@ public class WidgetLibrary implements ApplicationRunner {
 
     /** Saves a new definition owned by {@code owner}, in its personal library or the global one ({@code scope}). */
     public Saved create(JsonNode spec, String author, String owner, String scope, String layoutId, String pageId, Map<String, String> params) {
+        return create(spec, author, owner, scope, layoutId, pageId, params, null);
+    }
+
+    /** As {@link #create(JsonNode, String, String, String, String, String, Map)}, recording the skill's kind and template. */
+    public Saved create(JsonNode spec, String author, String owner, String scope, String layoutId, String pageId, Map<String, String> params,
+                        WidgetDefinition.Origin origin) {
         String id = spec.path("id").asText();
         if (repo.existsById(id)) throw new DuplicateException("a widget '" + id + "' already exists; update it, or pick another id");
-        return save(spec, 1, author, owner, scope, null, layoutId, pageId, params, null);
+        return save(spec, 1, author, owner, scope, null, layoutId, pageId, params, null, origin);
     }
 
     /** A new version of a definition; a personal one can only be changed by its owner. Ownership and review carry over. */
@@ -87,7 +93,8 @@ public class WidgetLibrary implements ApplicationRunner {
         if (!id.equals(spec.path("id").asText()))
             throw new IllegalArgumentException("spec id '" + spec.path("id").asText() + "' does not match '" + id + "'");
         return save(spec, current.getVersion() + 1, author, current.getOwner(), current.getScope(), current.getReview(),
-                layoutId, pageId, params, current.getCreatedAt());
+                layoutId, pageId, params, current.getCreatedAt(),
+                new WidgetDefinition.Origin(current.getKind(), current.getTemplateId(), current.getTemplateVersion()));
     }
 
     /**
@@ -109,7 +116,7 @@ public class WidgetLibrary implements ApplicationRunner {
     }
 
     private Saved save(JsonNode specIn, int version, String author, String owner, String scope, WidgetDefinition.Review review,
-                       String layoutId, String pageId, Map<String, String> params, Instant createdAt) {
+                       String layoutId, String pageId, Map<String, String> params, Instant createdAt, WidgetDefinition.Origin origin) {
         ObjectNode spec = (ObjectNode) SpecMigrator.migrate(specIn);
         spec.put("version", version);
         ValidationReport report = validator.validate(spec, layoutId, pageId, params);
@@ -134,6 +141,11 @@ public class WidgetLibrary implements ApplicationRunner {
         d.setOwner(owner);
         d.setScope(scope);
         d.setReview(review);
+        if (origin != null) {
+            d.setKind(origin.kind());
+            d.setTemplateId(origin.templateId());
+            d.setTemplateVersion(origin.templateVersion());
+        }
         d.setSpec(spec.toString());
         d.setCreatedAt(createdAt == null ? Instant.now() : createdAt);
         d.setUpdatedAt(Instant.now());
@@ -162,7 +174,7 @@ public class WidgetLibrary implements ApplicationRunner {
                 if (stored != null && stored.getVersion() >= fileVersion) continue;
                 Map<String, String> sample = new LinkedHashMap<>();
                 spec.path("provenance").path("sampleParams").fields().forEachRemaining(e -> sample.put(e.getKey(), e.getValue().asText()));
-                save(spec, fileVersion, "starter", "system", WidgetDefinition.GLOBAL, null, "default", null, sample, stored == null ? null : stored.getCreatedAt());
+                save(spec, fileVersion, "starter", "system", WidgetDefinition.GLOBAL, null, "default", null, sample, stored == null ? null : stored.getCreatedAt(), null);
                 loaded++;
             } catch (SpecInvalidException e) {
                 skipped++;

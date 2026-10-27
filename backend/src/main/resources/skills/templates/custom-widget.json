@@ -1,0 +1,10 @@
+{
+  "id": "custom-widget",
+  "version": 1,
+  "kind": "widget",
+  "title": "Custom widget",
+  "summary": "Describe any figure, chart, table or list in your own words and the assistant builds it.",
+  "icon": "spark",
+  "category": "General",
+  "pageScopes": ["client", "book"]
+}

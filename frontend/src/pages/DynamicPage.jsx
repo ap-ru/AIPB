@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePlatform, LAYOUT_ID } from '../lib/platform.jsx';
 import { api } from '../lib/api.js';
 import { useApi } from '../lib/useApi.js';
@@ -247,6 +247,17 @@ export default function DynamicPage() {
   useEffect(() => () => setAssistantOpen(false), [setAssistantOpen]);
   // a conversation belongs to the role that started it: switching roles closes it
   useEffect(() => { setAssisting(false); setChatOpened(false); setAdding(false); }, [role]);
+  // arriving from the Skills Studio: open the assistant with the chosen template (once - the state is cleared)
+  const location = useLocation();
+  const [startSkill, setStartSkill] = useState(null);
+  useEffect(() => {
+    const skill = location.state?.skill;
+    if (!skill || !page) return;
+    setStartSkill(skill);
+    setAssisting(true);
+    setChatOpened(true);
+    nav(location.pathname + location.search, { replace: true, state: null });
+  }, [location.state, page, location.pathname, location.search, nav]);
   if (!layout) return <Loading label="Loading layout" />;
   if (!page) {
     return (
@@ -263,7 +274,7 @@ export default function DynamicPage() {
       <ParamPickers params={params} />
       {can.canUseAssistant && (
         <button className="btn" onClick={() => { setAssisting(true); setChatOpened(true); }} disabled={!params.ready}
-          title="Describe a widget and the assistant builds it for you to approve"><Icon name="spark" size={13} /> Assistant</button>
+          title="Describe a skill, or start from a template, and the assistant builds it for you to approve"><Icon name="spark" size={13} /> Assistant</button>
       )}
       <button className="btn" onClick={() => setAdding(true)} disabled={!params.ready}><Icon name="plus" size={13} /> Widget</button>
       <button className="btn danger" title="Delete this page" onClick={async () => {
@@ -292,7 +303,8 @@ export default function DynamicPage() {
       )}
       {chatOpened && can.canUseAssistant && params.ready && (
         <div className="chat-host" hidden={!showChat}>
-          <AssistantChat page={page} pageParams={params.values} toolbar={<ParamPickers params={params} />} onClose={() => setAssisting(false)} />
+          <AssistantChat page={page} pageParams={params.values} start={startSkill} toolbar={<ParamPickers params={params} />}
+            onClose={() => setAssisting(false)} />
         </div>
       )}
     </>

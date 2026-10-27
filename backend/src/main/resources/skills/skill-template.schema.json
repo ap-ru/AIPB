@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Skill template",
+  "description": "A Skills Studio template: what the Studio shows, and what guides and constrains one assistant run. References (kind, stages, primitives, examples) are checked by SkillTemplateRegistry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "kind", "title", "summary", "icon", "category", "pageScopes"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "kind": { "type": "string", "description": "The skill kind this template builds, e.g. widget." },
+    "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "icon": { "type": "string", "minLength": 1 },
+    "category": { "type": "string", "minLength": 1 },
+    "pageScopes": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "enum": ["client", "book"] },
+      "description": "Pages the template fits: client = a page that supplies clientId; book = a page without one."
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Fields the Studio asks for before the conversation starts; the values go to Intake.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "label", "type"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9]{0,39}$" },
+          "label": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["text", "enum", "number"] },
+          "options": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "required": { "type": "boolean" },
+          "help": { "type": "string" }
+        }
+      }
+    },
+    "guidance": {
+      "type": "object",
+      "description": "Markdown added to a stage's system prompt, by stage name.",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "primitives": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "collections": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "handlers": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "scope": { "enum": ["client", "book"] },
+        "requireReview": { "type": "boolean" },
+        "maxRows": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brief": {
+          "type": "object",
+          "description": "Brief fields applied when Intake left them open (display \"any\", an empty value or null).",
+          "additionalProperties": false,
+          "properties": {
+            "display": { "type": "string" },
+            "sort": { "type": "string" },
+            "limit": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "examples": {
+      "type": "object",
+      "description": "Worked examples (resources/assistant/examples ids) that replace a stage's default examples.",
+      "additionalProperties": false,
+      "properties": {
+        "build": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "present": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+    "suggestions": { "type": "array", "items": { "type": "string" } }
+  }
+}

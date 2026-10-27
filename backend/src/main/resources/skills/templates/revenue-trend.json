@@ -1,0 +1,27 @@
+{
+  "id": "revenue-trend",
+  "version": 1,
+  "kind": "widget",
+  "title": "Revenue trend",
+  "summary": "Revenue over closed months or quarters - for the selected client, or across the book.",
+  "icon": "chart",
+  "category": "Revenue",
+  "pageScopes": ["client", "book"],
+  "inputs": [
+    { "name": "grain", "label": "Grain", "type": "enum", "options": ["Monthly", "Quarterly"], "required": false },
+    { "name": "split", "label": "Split by", "type": "enum", "options": ["None", "Line of business", "Fee vs. NII"], "required": false }
+  ],
+  "guidance": {
+    "intake": "This template builds a revenue trend over time. Scope follows the page: client on a page that supplies clientId, book otherwise. Grain defaults to quarterly (the last 8 closed quarters) for a client and monthly (the last 24 closed months) for the book. A split adds one series per line of business, or fee vs. NII. A request that is not a revenue trend (a single YTD figure, a ranking of clients) is declined with a suggestion of the Custom widget template.",
+    "build": "Revenue comes from revenue_monthly.totalUsd, booked by closed month: exclude the month containing asOfDate. Bucket by the brief's grain, oldest first, and return one row per period (per period and split value when split).",
+    "present": "Many periods are a line; 8 or fewer quarters can be a bar. Polarity is higher-is-better. With a split, stack the bars or use one line per series."
+  },
+  "constraints": {
+    "primitives": ["line", "bar", "metric"],
+    "collections": ["revenue_monthly"],
+    "maxRows": 120
+  },
+  "defaults": { "brief": { "display": "line" } },
+  "examples": { "build": ["client-revenue-trend", "client-revenue-ytd"], "present": ["book-revenue-by-lob-monthly", "client-revenue-by-lob"] },
+  "suggestions": ["Quarterly revenue for this client", "Monthly revenue by line of business"]
+}

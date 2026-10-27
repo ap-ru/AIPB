@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { usePlatform } from './lib/platform.jsx';
 import DynamicPage from './pages/DynamicPage.jsx';
 import Client360Page from './pages/Client360Page.jsx';
+import SkillsStudio from './pages/SkillsStudio.jsx';
 import Icon from './components/Icon.jsx';
 
 /** Demo role switcher: no sign-in yet, so whoever is at the screen picks who the app acts as. */
@@ -24,7 +25,7 @@ function RolePicker() {
 }
 
 function Sidebar() {
-  const { layout, error, source, assistantOpen } = usePlatform();
+  const { layout, error, source, assistantOpen, can } = usePlatform();
   const [logoOk, setLogoOk] = useState(true);
   return (
     <aside className="sidebar">
@@ -43,6 +44,12 @@ function Sidebar() {
         {(layout ? layout.pages : []).map((p) => (
           <NavLink key={p.id} to={'/page/' + p.id} title={assistantOpen ? p.title : undefined}><Icon name={p.icon} /><span className="nav-label">{p.title}</span></NavLink>
         ))}
+        {can.canUseAssistant && (
+          <>
+            <div className="nav-section">Build</div>
+            <NavLink to="/studio" title={assistantOpen ? 'Skills Studio' : undefined}><Icon name="skill" /><span className="nav-label">Skills Studio</span></NavLink>
+          </>
+        )}
       </nav>
       <div className="sidebar-foot">
         <RolePicker />
@@ -73,6 +80,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/page/command-center" replace />} />
           <Route path="/page/:pageId" element={<DynamicPage />} />
           <Route path="/clients/:clientId" element={<Client360Page />} />
+          <Route path="/studio" element={<SkillsStudio />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

@@ -30,11 +30,20 @@ public class WidgetDefinition {
     private String owner;        // actor id; "system" for starters
     private String scope;        // personal | global (null: global - saved before roles existed)
     private Review review;       // the request to publish a personal widget to the global library
+    private String kind;         // the skill kind: widget (null: widget - saved before skills existed)
+    private String templateId;   // the Skills Studio template it was built from, if any
+    private Integer templateVersion;
     private Instant createdAt;
     private Instant updatedAt;
 
     public static final String PERSONAL = "personal";
     public static final String GLOBAL = "global";
+    public static final String WIDGET = "widget";
+
+    /** Where a skill came from: its kind and the template that guided the assistant run (null for none). */
+    public record Origin(String kind, String templateId, Integer templateVersion) {}
+
+    public String kind() { return kind == null ? WIDGET : kind; }
 
     public boolean global() { return scope == null || GLOBAL.equals(scope); }
 

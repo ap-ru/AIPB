@@ -2,11 +2,14 @@ package com.aipb.assistant;
 
 import com.aipb.assistant.gates.BuildGate;
 import com.aipb.assistant.gates.PresentGate;
+import com.aipb.assistant.gates.TemplateGate;
 import com.aipb.assistant.llm.LlmMessage;
 import com.aipb.assistant.llm.LlmRequest;
 import com.aipb.assistant.stages.*;
 import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
+import com.aipb.skills.SkillTemplateRegistry;
+import com.aipb.skills.WidgetSkill;
 import com.aipb.source.SourceData;
 import com.aipb.source.SourceReader;
 import com.aipb.widget.*;
@@ -49,6 +52,7 @@ class AssistantOrchestratorTest {
     private WidgetDataService widgetData;
     private AssistantProperties props;
     private AssistantOrchestrator orchestrator;
+    private SkillTemplateRegistry templates;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -74,12 +78,15 @@ class AssistantOrchestratorTest {
         when(sessions.save(any())).thenAnswer(i -> { AssistantSession s = i.getArgument(0); store.put(s.getId(), s); return s; });
         when(sessions.findById(anyString())).thenAnswer(i -> Optional.ofNullable(store.get((String) i.getArgument(0))));
 
-        orchestrator = new AssistantOrchestrator(sessions,
-                new IntakeStage(runner, context, definitions, layouts, mapper),
-                new BuildStage(runner, context, tools, new BuildGate(validator, context, mapper)),
+        TemplateGate templateGate = new TemplateGate();
+        WidgetSkill widget = new WidgetSkill(
+                new BuildStage(runner, context, tools, new BuildGate(validator, context, mapper), templateGate),
                 mock(ReviewStage.class),
-                new PresentStage(runner, context, new PresentGate(validator, mapper), props, mapper),
-                new ProposalBuilder(mapper, widgetData), library, definitions, placement, props, mapper);
+                new PresentStage(runner, context, new PresentGate(validator, mapper), templateGate, props, mapper),
+                new ProposalBuilder(mapper, widgetData), library, definitions, mapper);
+        templates = new SkillTemplateRegistry(List.of(widget), new WidgetPrimitives(mapper), mapper);
+        orchestrator = new AssistantOrchestrator(sessions, new IntakeStage(runner, context, definitions, layouts, templateGate, mapper),
+                templates, library, definitions, placement, layouts, props, mapper);
     }
 
     // ------------------------------------------------------------------ scripts
@@ -272,7 +279,8 @@ class AssistantOrchestratorTest {
         verify(library).create(argThat(spec -> spec.path("id").asText().equals("quarterly-revenue-2")
                 && spec.path("provenance").path("reviewed").asText().equals("none")
                 && spec.path("provenance").path("question").asText().contains("revenue")),
-                eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any());
+                eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any(),
+                eq(new WidgetDefinition.Origin("widget", "custom-widget", 1)));
         verify(placement).placeDefinition("default", "client", "quarterly-revenue-2", "assistant");
         AssistantSession s = store.get(id);
         assertThat(s.getStatus()).isEqualTo(AssistantSession.PLACED);
@@ -308,6 +316,113 @@ class AssistantOrchestratorTest {
         verify(library, never()).submitForReview(any(), any(), any());
     }
 
+    // ------------------------------------------------------------------ skill templates
+    @Test
+    void aTemplatedRunIsGuidedAtEveryStageAndRecordedThroughToTheLibrary() {
+        claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
+        String id = orchestrator.create("default", "client", Map.of("clientId", "CL-0002"), "demo-builder", "revenue-trend",
+                Map.of("grain", "Quarterly")).getId();
+
+        orchestrator.message(id, "revenue by quarter", null, recorder);
+
+        AssistantSession s = store.get(id);
+        assertThat(s.getStatus()).isEqualTo(AssistantSession.PROPOSED);
+        assertThat(s.getTemplateId()).isEqualTo("revenue-trend");
+        assertThat(s.getKind()).isEqualTo("widget");
+        // every stage's system prompt ends with the template's guidance, and the manifest says which version
+        for (LlmRequest r : claude.requests) assertThat(r.system().get(r.system().size() - 1)).startsWith("# Skill template: Revenue trend");
+        assertThat(s.getRuns()).allSatisfy(run -> assertThat(run.getManifest()).extracting(ContextAssembler.ManifestEntry::source)
+                .contains("skills/templates/revenue-trend.json@v1"));
+        String intakeContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(0).messages().get(0)).blocks().get(0)).text();
+        assertThat(intakeContext).contains("<skill_inputs>").contains("- Grain: Quarterly");
+        // the open display preference took the template's default, and the banker is told
+        assertThat(read(s.getBrief()).path("display").asText()).isEqualTo("line");
+        JsonNode p = read(s.getProposal());
+        assertThat(p.path("skillKind").asText()).isEqualTo("widget");
+        assertThat(p.path("template").path("id").asText()).isEqualTo("revenue-trend");
+        assertThat(p.path("assumptions").toString()).contains("the Revenue trend template's default");
+
+        when(library.create(any(), eq("assistant"), any(), any(), any(), any(), any(), any())).thenAnswer(i -> {
+            WidgetDefinition d = new WidgetDefinition();
+            d.setId(((JsonNode) i.getArgument(0)).path("id").asText());
+            return new WidgetLibrary.Saved(d, ok());
+        });
+        orchestrator.approve(id, false);
+        verify(library).create(argThat(spec -> spec.path("provenance").path("template").asText().equals("revenue-trend@v1")),
+                eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any(),
+                eq(new WidgetDefinition.Origin("widget", "revenue-trend", 1)));
+    }
+
+    @Test
+    void aTemplatesConstraintsGoBackToClaudeAsCorrections() {
+        String holdings = SUBMIT.replace("revenue_monthly.totalUsd", "holdings.drawnUsd").replace("\"collection\":\"revenue_monthly\"", "\"collection\":\"holdings\"");
+        claude.on("intake", FakeGateway.json(BRIEF.replace("\"display\":\"any\"", "\"display\":\"line\"")), FakeGateway.json(BRIEF))
+              .on("build", FakeGateway.tool("submit_data", SUBMIT), FakeGateway.tool("submit_data", holdings))
+              .on("present", FakeGateway.json(DESIGN.replace("\"primitive\":\"bar\"", "\"primitive\":\"table\"")), FakeGateway.json(DESIGN));
+        String id = orchestrator.create("default", "client", Map.of("clientId", "CL-0002"), "demo-builder", "exposure-vs-limit", null).getId();
+
+        orchestrator.message(id, "how much of the limit is drawn", null, recorder);
+
+        assertThat(store.get(id).getStatus()).isEqualTo(AssistantSession.PROPOSED);
+        assertThat(claude.stagesCalled()).containsExactly("intake", "intake", "build", "build", "present", "present");
+        String intakeFix = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(2)).blocks().get(0)).text();
+        assertThat(intakeFix).contains("draws meter / bar / metric only");
+        LlmMessage.ToolResult buildFix = (LlmMessage.ToolResult) ((LlmMessage.User) claude.requests.get(3).messages().get(2)).blocks().get(0);
+        assertThat(buildFix.isError()).isTrue();
+        assertThat(buildFix.content()).contains("reads holdings only");
+        String presentFix = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(5).messages().get(2)).blocks().get(0)).text();
+        assertThat(presentFix).contains("not table");
+        assertThat(read(store.get(id).getBrief()).path("display").asText()).isEqualTo("meter"); // the template's default
+    }
+
+    @Test
+    void aRequestOutsideTheTemplateIsRedirectedToOneThatFitsThePage() {
+        String redirect = "{\"outcome\":\"redirect\",\"message\":\"Revenue trend builds that.\",\"brief\":null,\"reuseDefinitionId\":null,"
+                + "\"suggestedTemplateId\":\"%s\",\"changed\":[]}";
+        claude.on("intake", FakeGateway.json(redirect.formatted("exposure-vs-limit")), FakeGateway.json(redirect.formatted("revenue-trend")));
+        String id = orchestrator.create("default", "client", Map.of("clientId", "CL-0002"), "demo-builder", "exposure-vs-limit", null).getId();
+
+        orchestrator.message(id, "show revenue by quarter", null, recorder);
+
+        String intakeContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(0).messages().get(0)).blocks().get(0)).text();
+        assertThat(intakeContext).contains("<other_templates>").contains("- revenue-trend: Revenue trend").contains("- custom-widget:")
+                .doesNotContain("- exposure-vs-limit:");
+        assertThat(claude.requests.get(0).system().get(claude.requests.get(0).system().size() - 1)).contains("## Requests outside this template");
+        // suggesting the template already in use is corrected
+        String fix = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(2)).blocks().get(0)).text();
+        assertThat(fix).contains("'exposure-vs-limit' is not in <other_templates>");
+        AssistantSession s = store.get(id);
+        AssistantSession.Turn last = s.getTurns().get(s.getTurns().size() - 1);
+        assertThat(last.getKind()).isEqualTo("redirect");
+        assertThat(last.getTemplateId()).isEqualTo("revenue-trend");
+        assertThat(s.getStatus()).isEqualTo(AssistantSession.AWAITING_USER);
+    }
+
+    @Test
+    void aCustomWidgetRunHasNoRedirects() {
+        claude.on("intake",
+                FakeGateway.json("{\"outcome\":\"redirect\",\"message\":\"x\",\"brief\":null,\"reuseDefinitionId\":null,\"suggestedTemplateId\":\"revenue-trend\",\"changed\":[]}"),
+                FakeGateway.json("{\"outcome\":\"clarify\",\"message\":\"Which measure?\",\"brief\":null,\"reuseDefinitionId\":null,\"suggestedTemplateId\":\"\",\"changed\":[]}"));
+        String id = newSession();
+        orchestrator.message(id, "show me that", null, recorder);
+        String intakeContext = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(0).messages().get(0)).blocks().get(0)).text();
+        assertThat(intakeContext).doesNotContain("<other_templates>");
+        String fix = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(1).messages().get(2)).blocks().get(0)).text();
+        assertThat(fix).contains("redirect is not available here");
+    }
+
+    @Test
+    void aSessionsTemplateMustFitThePageAndItsInputs() {
+        assertThatThrownBy(() -> orchestrator.create("default", "command-center", Map.of(), "demo-builder", "exposure-vs-limit", null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("is for client pages");
+        assertThatThrownBy(() -> orchestrator.create("default", "client", Map.of(), "demo-builder", "revenue-trend", Map.of("grain", "Weekly")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must be one of");
+        assertThatThrownBy(() -> orchestrator.create("default", "client", Map.of(), "demo-builder", "no-such-template", null))
+                .isInstanceOf(NoSuchElementException.class);
+        AssistantSession plain = store.get(newSession());
+        assertThat(plain.getTemplateId()).isEqualTo("custom-widget");
+    }
+
     @Test
     void aSessionBelongsToItsOwner() {
         String id = newSession();
@@ -320,7 +435,7 @@ class AssistantOrchestratorTest {
         claude.on("intake", FakeGateway.json(BRIEF)).on("build", FakeGateway.tool("submit_data", SUBMIT)).on("present", FakeGateway.json(DESIGN));
         String id = newSession();
         orchestrator.message(id, "revenue by quarter", null, recorder);
-        when(library.create(any(), eq("assistant"), any(), any(), any(), any(), any())).thenAnswer(i -> {
+        when(library.create(any(), eq("assistant"), any(), any(), any(), any(), any(), any())).thenAnswer(i -> {
             WidgetDefinition d = new WidgetDefinition();
             d.setId(((JsonNode) i.getArgument(0)).path("id").asText());
             return new WidgetLibrary.Saved(d, ok());

@@ -280,6 +280,23 @@ Static context goes in the system prompt. It is generated deterministically from
 
 Every stage run records a **manifest** of what the model was given (block, source, size, hash), plus the dynamic message verbatim, its tokens, cost and tool calls. You can see these under **Details** in the drawer or at `GET /api/assistant/sessions/{id}/runs`. `ContextAssemblyTest` writes each stage's full request to `backend/target/assistant-context/<stage>.md` for review.
 
+### Skills and templates
+A widget is one **kind of skill**. Insights (summaries of figures, rendered by code) and actions (buttons that run app-internal automations) are planned next. Every assistant run builds one kind, guided by a **Skills Studio template**: `backend/src/main/resources/skills/templates/*.json`, validated against `skills/skill-template.schema.json` and checked at startup by `SkillTemplateRegistry`.
+
+A template carries:
+- the pages it fits (`pageScopes`);
+- form `inputs`, whose values reach Intake as `<skill_inputs>`;
+- per-stage `guidance`, appended as one `template-guidance` block after the shared, cached system blocks;
+- worked `examples` that replace a stage's defaults;
+- `constraints` (scope, collections, primitives, max rows), enforced by `TemplateGate` inside each stage's gate, so a breach goes back to Claude as a correction;
+- brief `defaults`, which fill fields Intake left open and are listed as assumptions.
+
+**Skills Studio** (`/studio`, Builder/Reviewer): a grid of templates. Picking one asks for its inputs and a page that fits, then opens the assistant there with the template chosen. The assistant's empty state also has a **Start from** picker, limited to the templates that fit the page.
+
+If a templated run gets a request the template doesn't build, Intake answers `redirect` with a `suggestedTemplateId` taken from the `<other_templates>` it was shown. The chat then offers **Switch to …**, which starts a new conversation with that template and the same request. Custom widget runs take any request, so they never redirect.
+
+`custom-widget` is the free-form template. It adds nothing, so its prompts are byte-identical to running with no template. Sessions started without a `templateId` use it. Saved definitions record `kind`, `templateId` and `templateVersion`. Kind-specific flow lives behind `SkillKind` (`WidgetSkill` today).
+
 ### Tools
 
 Build and Review use read-only tools. All of them go through `SourceData`, so the database stays pinned to `bank`, results are capped, and outputs are trimmed to a few rows:
@@ -350,7 +367,9 @@ cd backend && mvn test -Dgroups=eval -Dsurefire.excludedGroups= -Daipb.eval.limi
 | GET | `/api/layouts/{id}/pages/{pageId}/context/filters/{dimension}/options` | Choices for one of a page's filters |
 | GET | `/api/widgets/placed/{layoutId}/{pageId}/{widgetId}/data?<page values>` | Run a placed widget in its page's context (client, period, filters, placement bindings): rows, view, applied context, notes |
 | GET | `/api/assistant/status` | Assistant enabled, model, effort per stage |
-| POST | `/api/assistant/sessions` `{layoutId, pageId, params}` | Start a conversation on a page |
+| GET | `/api/skills/templates?pageId=` | Skills Studio templates (Builder/Reviewer), optionally only those that fit a page |
+| GET | `/api/skills/templates/{id}` | One template: kind, summary, inputs, suggestions |
+| POST | `/api/assistant/sessions` `{layoutId, pageId, params, templateId, inputs}` | Start a conversation on a page, from a template (default `custom-widget`) |
 | GET | `/api/assistant/sessions/{id}` | Conversation state (turns, status, proposal, cost) |
 | POST | `/api/assistant/sessions/{id}/messages` `{text, params}` | Send a message → **SSE**: `stage`, `activity`, `message`, `proposal`, `error`, `done` |
 | POST | `/api/assistant/sessions/{id}/verify` | Opt-in independent review → SSE |
