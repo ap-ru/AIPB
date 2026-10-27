@@ -5,6 +5,7 @@ import DynamicPage from './pages/DynamicPage.jsx';
 import Client360Page from './pages/Client360Page.jsx';
 import { NewIssuePage, NewIssueSearchPage, TransactionDetailsPage } from './pages/NewIssuePage.jsx';
 import SignalsPage from './pages/SignalsPage.jsx';
+import PrecallBriefPage from './pages/PrecallBriefPage.jsx';
 import Icon from './components/Icon.jsx';
 
 /** Demo role switcher: no sign-in yet, so whoever is at the screen picks who the app acts as. */
@@ -46,6 +47,7 @@ function Sidebar() {
         {(layout ? layout.pages : []).map((p) => (
           <NavLink key={p.id} to={'/page/' + p.id} title={assistantOpen ? p.title : undefined}><Icon name={p.icon} /><span className="nav-label">{p.title}</span></NavLink>
         ))}
+        <NavLink to="/precall-brief" title={assistantOpen ? 'Pre-call Brief' : undefined}><Icon name="users" /><span className="nav-label">Pre-call Brief</span></NavLink>
         <NavLink to="/signals" title={assistantOpen ? 'Signals' : undefined}><Icon name="pulse" /><span className="nav-label">Signals</span></NavLink>
       </nav>
       <div className="sidebar-foot">
@@ -80,6 +82,7 @@ export default function App() {
           <Route path="/new-issue" element={<NewIssuePage />} />
           <Route path="/new-issue/search" element={<NewIssueSearchPage />} />
           <Route path="/new-issue/deals/:dealId" element={<TransactionDetailsPage />} />
+          <Route path="/precall-brief" element={<PrecallBriefPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

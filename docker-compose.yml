@@ -57,6 +57,23 @@ services:
       bank-seed:
         condition: service_completed_successfully
 
+  # One-shot: adds the pre-call brief's extra collections (meetings, balance history, payments, ownership, industry
+  # context) to `bank`; touches nothing else (PRECALL_PLUS_RESET=true regenerates).
+  precall-plus-seed:
+    image: mongo:7
+    container_name: aipb-precall-plus-seed
+    restart: "no"
+    environment:
+      SEED_DIR: /seed
+      PRECALL_PLUS_RESET: ${PRECALL_PLUS_RESET:-false}
+      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD}
+    volumes:
+      - ./data:/seed:ro
+    command: ["sh", "-c", "exec mongosh \"mongodb://bank_writer:$${BANK_WRITER_PASSWORD}@mongo:27017/bank?authSource=bank\" --quiet /seed/generate-precall-plus.js"]
+    depends_on:
+      bank-seed:
+        condition: service_completed_successfully
+
   # MongoDB MCP server: read-only access to the `bank` source data for the assistant exploring data while it designs a
   # widget, and for Claude Code via .mcp.json. Pages do not use it: the backend reads widget data with the driver.
   mcp:

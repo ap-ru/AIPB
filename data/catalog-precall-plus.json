@@ -1,0 +1,103 @@
+[
+  {
+    "_id": "precall_upcoming_meetings",
+    "description": "Pre-call brief: meetings scheduled with the client in the next 45 days. Synthetic.",
+    "grain": "one row per scheduled meeting",
+    "primaryKey": "_id",
+    "relationships": [{ "field": "clientId", "references": "clients.clientId" }, { "field": "opportunityId", "references": "opportunities.opportunityId" }],
+    "fields": [
+      { "name": "_id", "type": "string", "description": "The client's profile _id, MTG and a row number (e.g. VANTAGE-18436-MTG-0001)." },
+      { "name": "clientId", "type": "string", "description": "Client." },
+      { "name": "sourcePrId", "type": "string", "description": "Source pr_id, as on precall_company_profiles." },
+      { "name": "meetingDate", "type": "date", "description": "Start date and time (UTC). Always after _meta.asOfDate." },
+      { "name": "durationMinutes", "type": "int", "description": "Planned length." },
+      { "name": "meetingType", "type": "string", "description": "Format.", "allowedValues": ["In person", "Video", "Call"] },
+      { "name": "location", "type": "string", "description": "Where it takes place." },
+      { "name": "purpose", "type": "string", "description": "Meeting purpose." },
+      { "name": "agenda", "type": "array<string>", "description": "Agenda items." },
+      { "name": "citizensAttendees", "type": "array<string>", "description": "Citizens bankers attending." },
+      { "name": "clientAttendees", "type": "array<string>", "description": "Client attendees as 'Name (Title)', from contacts." },
+      { "name": "organizer", "type": "string", "description": "Banker who set it up (the relationship manager)." },
+      { "name": "status", "type": "string", "description": "Meeting status.", "allowedValues": ["Scheduled"] },
+      { "name": "opportunityId", "type": "string", "description": "Open opportunity the meeting is about, when it is a financing discussion." }
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_balance_history",
+    "description": "Pre-call brief: the client's total drawn loans, loan commitments and deposit balances over the last 24 months: 23 month-ends plus today. The current row (isCurrent) equals the sums over today's holdings. Synthetic.",
+    "grain": "one row per client per month-end, plus today",
+    "primaryKey": "_id",
+    "relationships": [{ "field": "clientId", "references": "clients.clientId" }],
+    "fields": [
+      { "name": "_id", "type": "string", "description": "The client's profile _id, BAL and a row number." },
+      { "name": "clientId", "type": "string", "description": "Client." },
+      { "name": "sourcePrId", "type": "string", "description": "Source pr_id." },
+      { "name": "asOfDate", "type": "date", "description": "Month-end date, or _meta.asOfDate on the current row." },
+      { "name": "isCurrent", "type": "bool", "description": "True on the row for today (equals today's holdings)." },
+      { "name": "loanBalanceUsd", "type": "number", "description": "Total drawn across credit holdings.", "unit": "USD" },
+      { "name": "loanCommitmentUsd", "type": "number", "description": "Total committed across credit holdings.", "unit": "USD" },
+      { "name": "depositBalanceUsd", "type": "number", "description": "Total across deposit holdings.", "unit": "USD" }
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_payment_flows",
+    "description": "Pre-call brief: the client's payments through Citizens accounts in the last 30 days, incoming and outgoing. Synthetic.",
+    "grain": "one row per payment",
+    "primaryKey": "_id",
+    "relationships": [{ "field": "clientId", "references": "clients.clientId" }],
+    "fields": [
+      { "name": "_id", "type": "string", "description": "The client's profile _id, PAY and a row number." },
+      { "name": "clientId", "type": "string", "description": "Client." },
+      { "name": "sourcePrId", "type": "string", "description": "Source pr_id." },
+      { "name": "paymentDate", "type": "date", "description": "Value date, within the 30 days up to _meta.asOfDate." },
+      { "name": "direction", "type": "string", "description": "Into or out of the client's accounts.", "allowedValues": ["Incoming", "Outgoing"] },
+      { "name": "counterparty", "type": "string", "description": "Who paid or was paid." },
+      { "name": "counterpartyType", "type": "string", "description": "Counterparty category.", "allowedValues": ["Customer", "Supplier", "Payroll", "Tax authority", "Lender", "Intercompany", "Investor"] },
+      { "name": "channel", "type": "string", "description": "Payment rail.", "allowedValues": ["Wire", "ACH", "RTP", "Book transfer"] },
+      { "name": "currency", "type": "string", "description": "Original currency of the payment." },
+      { "name": "amountUsd", "type": "number", "description": "Amount in USD (always positive; direction gives the sign).", "unit": "USD" }
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_ownership",
+    "description": "Pre-call brief: who owns the company - institutional holders and float for public companies; sponsor, family or parent for private ones. ownershipPct sums to 100 per client. Synthetic.",
+    "grain": "one row per holder per client",
+    "primaryKey": "_id",
+    "relationships": [{ "field": "clientId", "references": "clients.clientId" }],
+    "fields": [
+      { "name": "_id", "type": "string", "description": "The client's profile _id, OWN and a row number." },
+      { "name": "clientId", "type": "string", "description": "Client." },
+      { "name": "sourcePrId", "type": "string", "description": "Source pr_id." },
+      { "name": "holderName", "type": "string", "description": "Holder." },
+      { "name": "holderType", "type": "string", "description": "Holder category.", "allowedValues": ["Institutional", "Insider", "Public float", "Private equity", "Family", "Employees", "Parent company"] },
+      { "name": "ownershipPct", "type": "number", "description": "Share of the equity.", "unit": "%" },
+      { "name": "isControlling", "type": "bool", "description": "True when the holder owns 50% or more." },
+      { "name": "asOfDate", "type": "date", "description": "Date of the ownership snapshot." }
+    ],
+    "derivedMetrics": []
+  },
+  {
+    "_id": "precall_industry_context",
+    "description": "Pre-call brief: outlook and sector indicators per industry (the same industry list as clients.industry). Synthetic research notes.",
+    "grain": "one row per industry",
+    "primaryKey": "industry",
+    "relationships": [{ "field": "industry", "references": "clients.industry" }],
+    "fields": [
+      { "name": "_id", "type": "string", "description": "Same as industry." },
+      { "name": "industry", "type": "string", "description": "Industry, as in clients.industry." },
+      { "name": "outlook", "type": "string", "description": "Sector credit outlook.", "allowedValues": ["Positive", "Stable", "Negative"] },
+      { "name": "summary", "type": "string", "description": "Two-sentence sector view." },
+      { "name": "keyDrivers", "type": "array<string>", "description": "What moves the sector." },
+      { "name": "keyRisks", "type": "array<string>", "description": "Main sector risks." },
+      { "name": "revenueGrowthPct", "type": "number", "description": "Expected sector revenue growth, next 12 months.", "unit": "%" },
+      { "name": "ebitdaMarginPct", "type": "number", "description": "Typical sector EBITDA margin.", "unit": "%" },
+      { "name": "defaultRatePct", "type": "number", "description": "Sector speculative-grade default rate.", "unit": "%" },
+      { "name": "asOfDate", "type": "date", "description": "Date of the research note." },
+      { "name": "source", "type": "string", "description": "Where the view comes from." }
+    ],
+    "derivedMetrics": []
+  }
+]
