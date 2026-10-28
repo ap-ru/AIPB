@@ -4,6 +4,8 @@ import com.aipb.assistant.AssistantProperties;
 import com.aipb.assistant.AssistantTools;
 import com.aipb.assistant.ContextAssembler;
 import com.aipb.assistant.gates.PresentGate;
+import com.aipb.assistant.gates.TemplateGate;
+import com.aipb.skills.SkillTemplate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -19,9 +21,10 @@ import java.util.List;
 
 /**
  * Stage 4 - design the display. Objective: the clearest display of these rows on this page. Sees: the primer, its
- * rules, the design catalog (primitives, roles, row limits, guidance) and four worked examples (static); the page,
- * the brief, the data's columns, sample rows and any warnings (dynamic). Gate: {@link PresentGate} - the assembled
- * spec must pass the widget validator for the page.
+ * rules, the design catalog (primitives, roles, row limits, guidance), four worked examples (or the template's) and the
+ * template's guidance (static); the page, the brief, the data's columns, sample rows and any warnings (dynamic). Gate:
+ * a primitive the template allows ({@link TemplateGate}), then {@link PresentGate} - the assembled spec must pass the
+ * widget validator for the page.
  */
 @Component
 public class PresentStage {
@@ -31,14 +34,17 @@ public class PresentStage {
     private final StageRunner runner;
     private final ContextAssembler context;
     private final PresentGate gate;
+    private final TemplateGate templateGate;
     private final AssistantProperties props;
     private final ObjectMapper mapper;
     private final JsonNode schema;
 
-    public PresentStage(StageRunner runner, ContextAssembler context, PresentGate gate, AssistantProperties props, ObjectMapper mapper) {
+    public PresentStage(StageRunner runner, ContextAssembler context, PresentGate gate, TemplateGate templateGate, AssistantProperties props,
+                        ObjectMapper mapper) {
         this.runner = runner;
         this.context = context;
         this.gate = gate;
+        this.templateGate = templateGate;
         this.props = props;
         this.mapper = mapper;
         try (InputStream in = new ClassPathResource("assistant/schemas/present.json").getInputStream()) {
@@ -51,12 +57,15 @@ public class PresentStage {
     /** The design and the assembled, validated spec (with its validation report). */
     public record Result(JsonNode design, PresentGate.Result checked) {}
 
-    public Result run(JsonNode brief, JsonNode artifact, String changeRequest, AssistantTools.Context ctx, RunRecorder rec, Instant deadline) {
-        List<ContextAssembler.Block> system = context.presentSystem();
+    public Result run(JsonNode brief, JsonNode artifact, String changeRequest, AssistantTools.Context ctx, SkillTemplate template,
+                      RunRecorder rec, Instant deadline) {
+        List<ContextAssembler.Block> system = context.presentSystem(template);
         String user = userContext(brief, artifact, changeRequest, ctx);
         rec.context(context.manifest(system, user), user);
         PresentGate.Result[] last = new PresentGate.Result[1];
         JsonNode design = runner.structured("present", system, user, schema, d -> {
+            List<String> breaches = template == null ? List.of() : templateGate.present(d, template);
+            if (!breaches.isEmpty()) return breaches;
             last[0] = gate.check(d, artifact, ctx);
             return last[0].errors();
         }, props.getMaxPresentAttempts(), rec, deadline);

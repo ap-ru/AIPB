@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { assistant, skills } from '../../lib/assistant.js';
+import { assistant } from '../../lib/assistant.js';
+import { skills } from '../../lib/skills.js';
 import { usePlatform } from '../../lib/platform.jsx';
 import SpecView from '../../widgets/spec/SpecView.jsx';
 import Icon from '../Icon.jsx';

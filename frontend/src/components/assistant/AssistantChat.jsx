@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { assistant, skills } from '../../lib/assistant.js';
+import { assistant } from '../../lib/assistant.js';
+import { skills, CUSTOM_WIDGET, KIND_LABELS } from '../../lib/skills.js';
 import { usePlatform, LAYOUT_ID } from '../../lib/platform.jsx';
 import SpecView from '../../widgets/spec/SpecView.jsx';
 import SkillsPanel from '../skills/SkillsPanel.jsx';
 import Icon from '../Icon.jsx';
 
+/** The widget stages, until a session tells us its kind's own (session.stages). */
 const STEPS = [['intake', 'Understanding'], ['build', 'Finding the data'], ['review', 'Checking the numbers'], ['present', 'Designing']];
 
 const SUGGESTIONS = {
@@ -17,9 +19,9 @@ function Avatar() {
 }
 
 /** Live progress while a stage pipeline runs: the current step, the steps so far, and the latest activity. */
-function Thinking({ stages, activity, ack }) {
+function Thinking({ stages, activity, ack, labels = STEPS }) {
   const seen = new Set(stages.map((s) => s.stage));
-  const steps = STEPS.filter(([k]) => k !== 'review' || seen.has('review'));
+  const steps = labels.filter(([k]) => k !== 'review' || seen.has('review'));
   const status = (k) => [...stages].reverse().find((s) => s.stage === k)?.status || 'todo';
   const current = [...steps].reverse().find(([k]) => status(k) === 'started') || steps.find(([k]) => status(k) === 'todo');
   return (
@@ -202,6 +204,43 @@ function Earlier({ earlier }) {
   );
 }
 
+/**
+ * Which Skills Studio template the conversation starts from (Custom widget by default), and the template's inputs.
+ * Only templates that fit the page are offered.
+ */
+function TemplatePicker({ options, template, inputs, onTemplate, onInputs, disabled }) {
+  if (!options || options.length < 2) return null;
+  return (
+    <div className="tpl-picker">
+      <div className="tpl-row">
+        <span className="label">Start from</span>
+        {options.map((t) => (
+          <button key={t.id} className={'chat-chip' + (template?.id === t.id ? ' active' : '')} disabled={disabled}
+            onClick={() => onTemplate(t)} title={t.summary}>
+            <Icon name={t.icon} size={12} /> {t.title}
+          </button>
+        ))}
+      </div>
+      {template && template.id !== CUSTOM_WIDGET && (
+        <div className="tpl-summary">
+          <span>{template.summary}</span>
+          {template.inputs.map((i) => (
+            <label key={i.name} className="tpl-input">
+              <span>{i.label}</span>
+              {i.type === 'enum'
+                ? <select value={inputs[i.name] || ''} disabled={disabled} onChange={(e) => onInputs({ ...inputs, [i.name]: e.target.value })}>
+                    <option value="">{i.required ? 'Choose…' : 'Any'}</option>
+                    {i.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                : <input value={inputs[i.name] || ''} disabled={disabled} onChange={(e) => onInputs({ ...inputs, [i.name]: e.target.value })} />}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Details({ sessionId }) {
   const [runs, setRuns] = useState(null);
   useEffect(() => { assistant.runs(sessionId).then(setRuns).catch(() => setRuns([])); }, [sessionId]);
@@ -256,7 +295,7 @@ function Composer({ value, onChange, onSend, running, disabled, autoFocus, place
  * The widget assistant as a full-page conversation. It proposes; the banker approves before anything is added.
  * Kept mounted while hidden, so going back to the dashboard and returning keeps the conversation.
  */
-export default function AssistantChat({ page, pageParams, toolbar, onClose, openSessionId, onElsewhere }) {
+export default function AssistantChat({ page, pageParams, start, toolbar, onClose, openSessionId, onElsewhere }) {
   const { setLayout, role, can } = usePlatform();
   const [showSkills, setShowSkills] = useState(false);
   const [attention, setAttention] = useState(0);
@@ -270,11 +309,15 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
   const [ack, setAck] = useState(null);
   const [problem, setProblem] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+  // the template the next conversation starts from (null: Custom widget), its inputs, and the templates this page offers
+  const [template, setTemplate] = useState(null);
+  const [inputs, setInputs] = useState({});
+  const [options, setOptions] = useState(null);
   const scroller = useRef(null);
 
   useEffect(() => { assistant.status().then((s) => setEnabled(s.enabled)).catch(() => setEnabled(false)); }, []);
   const reset = () => { setSession(null); setStages([]); setActivity([]); setAck(null); setProblem(null); setPending(null); setShowDetails(false); };
-  useEffect(reset, [page.id]);
+  useEffect(() => { reset(); setTemplate(null); setInputs({}); }, [page.id]);
   const loadAttention = () => skills.list().then((r) => setAttention(r.attention)).catch(() => {});
   useEffect(() => { loadAttention(); }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -290,7 +333,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
   };
   const modify = async (widget) => {
     setShowSkills(false);
-    try { await show(await assistant.create(LAYOUT_ID, page.id, pageParams, widget.id)); } catch (e) { setProblem(e.message); }
+    try { await show(await assistant.create(LAYOUT_ID, page.id, pageParams, { modifies: widget.id })); } catch (e) { setProblem(e.message); }
   };
   useEffect(() => { if (openSessionId) openSession(openSessionId); }, [openSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   // decisions a Reviewer takes elsewhere show up in an open conversation
@@ -301,6 +344,14 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
     }).catch(() => {}), 15000);
     return () => clearInterval(t);
   }, [session, running]);
+  useEffect(() => { setOptions(null); skills.templates(page.id).then(setOptions).catch(() => setOptions([])); }, [page.id]);
+  // opened from the Skills Studio: a fresh conversation with the chosen template
+  useEffect(() => {
+    if (!start) return;
+    reset();
+    setInputs(start.inputs || {});
+    skills.template(start.templateId).then(setTemplate).catch((e) => setProblem(e.message));
+  }, [start]);
   useEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
@@ -315,24 +366,39 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
     else if (event === 'error') setProblem(data.message);
   };
 
-  const run = async (start) => {
+  /** Runs {@code call} on the session, creating one first; {@code fresh} starts a new one (with {@code tpl}, e.g. after a redirect). */
+  const run = async (call, { fresh = false, tpl = template, tplInputs = inputs } = {}) => {
     setRunning(true); setProblem(null); setStages([]); setActivity([]); setAck(null);
     try {
-      let s = session;
-      if (!s) { s = await assistant.create(LAYOUT_ID, page.id, pageParams); setSession(s); }
-      await start(s.id);
+      let s = fresh ? null : session;
+      if (!s) {
+        const chosen = tpl && tpl.id !== CUSTOM_WIDGET ? tpl.id : null;
+        s = await assistant.create(LAYOUT_ID, page.id, pageParams, chosen ? { templateId: chosen, inputs: tplInputs } : {});
+        setSession(s);
+      }
+      await call(s.id);
       await refresh(s.id);
     } catch (e) {
       setProblem(e.message);
     } finally { setRunning(false); setPending(null); setAck(null); }
   };
 
-  const send = (raw = text) => {
+  const send = (raw = text, opts) => {
     const t = raw.trim();
     if (!t || running) return;
     setText('');
     setPending(t);
-    run((id) => assistant.message(id, t, pageParams, onEvent));
+    run((id) => assistant.message(id, t, pageParams, onEvent), opts);
+  };
+
+  /** The assistant suggested another template: start over with it and ask the same thing again. */
+  const switchTo = (templateId, question) => {
+    const t = (options || []).find((o) => o.id === templateId);
+    if (!t) return;
+    reset();
+    setTemplate(t);
+    setInputs({});
+    send(question, { fresh: true, tpl: t, tplInputs: {} });
   };
 
   const verify = () => { setPending('Verify the numbers.'); run((id) => assistant.verify(id, onEvent)); };
@@ -348,6 +414,11 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
   };
 
   const turns = session?.turns || [];
+  const active = session?.template || template; // once started, the session's template is the one in use
+  const labels = session?.stages ? Object.entries(session.stages) : STEPS;
+  const titleOf = (id) => (options || []).find((o) => o.id === id)?.title || id;
+  const askedBefore = (i) => [...turns.slice(0, i)].reverse().find((t) => t.role === 'user')?.text;
+  const suggestions = template?.suggestions?.length ? template.suggestions : null;
   const empty = !turns.length && !pending;
   const lastProposal = turns.map((t) => t.kind).lastIndexOf('proposal');
   const submitted = lastProposal >= 0 && turns.slice(lastProposal + 1).some((t) => ['submitted', 'approved'].includes(t.kind));
@@ -356,7 +427,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
 
   const composer = (
     <Composer value={text} onChange={setText} onSend={() => send()} running={running} disabled={off} autoFocus
-      placeholder={off ? 'The assistant is not configured' : empty ? 'Describe the widget you want…' : 'Reply, or ask for a change…'} />
+      placeholder={off ? 'The assistant is not configured' : empty ? 'Describe what you want…' : 'Reply, or ask for a change…'} />
   );
 
   return (
@@ -364,6 +435,11 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
       <header className="chat-head">
         <button className="btn ghost small" onClick={onClose} title="Back to the dashboard"><Icon name="left" size={14} /> {page.title}</button>
         <div className="chat-head-title"><Icon name="spark" size={14} /> Assistant</div>
+        {active && active.id !== CUSTOM_WIDGET && (
+          <span className="tag tpl-tag" title={'Built from the ' + active.title + ' template'}>
+            <Icon name={active.icon} size={11} /> {active.title} · {KIND_LABELS[active.kind] || active.kind}
+          </span>
+        )}
         <div className="spacer" />
         {toolbar}
         <button className="btn small skills-btn" onClick={() => setShowSkills(true)}
@@ -383,13 +459,17 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
           {empty ? (
             <div className="chat-hero">
               <div className="chat-hero-mark"><Icon name="spark" size={22} stroke={2} /></div>
-              <h1>What should we add to {page.title}?</h1>
-              <p>Describe a widget in plain words. I’ll find the data, check it, and show you a live preview. {can.canReview
+              <h1>{template && template.id !== CUSTOM_WIDGET ? template.title : `What should we add to ${page.title}?`}</h1>
+              <p>{template && template.id !== CUSTOM_WIDGET
+                ? 'Describe what you need and I’ll build it the way this template defines, then show you a live preview.'
+                : 'Describe a widget in plain words, or start from a template. I’ll find the data, check it, and show you a live preview.'} {can.canReview
                 ? 'What you approve goes live for everyone.'
                 : 'Add & share puts it in your personal library and on the page - only you see it there until a Reviewer approves it.'}</p>
+              <TemplatePicker options={options} template={template || options?.find((o) => o.id === CUSTOM_WIDGET)} inputs={inputs}
+                onTemplate={(t) => { setTemplate(t); setInputs({}); }} onInputs={setInputs} disabled={off || running} />
               {composer}
               <div className="chat-suggest">
-                {SUGGESTIONS[forClient ? 'client' : 'book'].map((s) => (
+                {(suggestions || SUGGESTIONS[forClient ? 'client' : 'book']).map((s) => (
                   <button key={s} className="chat-chip" disabled={off || running} onClick={() => send(s)}>{s}</button>
                 ))}
               </div>
@@ -409,6 +489,13 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
                   <Avatar />
                   <div className="msg-main">
                     <div className="msg-text">{t.text}</div>
+                    {t.kind === 'redirect' && t.templateId && (
+                      <div className="pv-actions">
+                        <button className="btn primary small" disabled={running} onClick={() => switchTo(t.templateId, askedBefore(i))}>
+                          Switch to {titleOf(t.templateId)} <Icon name="right" size={12} /></button>
+                        <span className="pv-hint">starts a new conversation with the same request</span>
+                      </div>
+                    )}
                     {i === lastProposal && session.proposal && (
                       <Proposal proposal={session.proposal} reviewState={session.reviewState} placed={session.status === 'placed'}
                         submitted={submitted} session={session} reviewer={can.canReview}
@@ -418,7 +505,7 @@ export default function AssistantChat({ page, pageParams, toolbar, onClose, open
                 </div>
               ))}
               {pending && <div className="msg user"><div className="msg-bubble">{pending}</div></div>}
-              {running && pending && <Thinking stages={stages} activity={activity} ack={ack} />}
+              {running && pending && <Thinking stages={stages} activity={activity} ack={ack} labels={labels} />}
               {problem && (
                 <div className="msg assistant error"><Avatar /><div className="msg-main"><div className="msg-text">{problem}</div></div></div>
               )}

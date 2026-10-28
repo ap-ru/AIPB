@@ -5,6 +5,7 @@ import com.aipb.assistant.stages.*;
 import com.aipb.identity.Actor;
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
+import com.aipb.skills.*;
 import com.aipb.source.SourceException;
 import com.aipb.widget.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,21 +21,23 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Runs the widget assistant: a code-orchestrated pipeline of narrow stages, each a separate Claude conversation with
- * one objective and a deterministic gate.
+ * Runs the assistant: a code-orchestrated pipeline of narrow stages, each a separate Claude conversation with one
+ * objective and a deterministic gate. Every run builds one kind of skill, guided by the Skills Studio template the
+ * session was started from (Custom widget when none was chosen).
  * <pre>
- * message -> INTAKE -> proceed -> BUILD -> PRESENT -> proposal -> submitted for approval (a Reviewer's is approved)
- *                   -> clarify / answer / decline / reuse (reply, no build; a reused widget is placed as it is)
- *                   -> verify (opt-in) -> REVIEW -> [findings -> BUILD -> PRESENT]
+ * message -> INTAKE -> proceed -> the kind's stages (widget: BUILD -> PRESENT) -> proposal -> submitted for approval (a Reviewer's is approved)
+ *                   -> clarify / answer / decline / redirect / reuse (reply, no build; a reused skill is placed as it is)
+ *                   -> verify (opt-in) -> the kind's verification
  * Reviewer: feedback & revise -> the comment joins the conversation -> the Builder's next message revises -> resubmitted
  * </pre>
- * A revision that only changes the display re-runs PRESENT alone. Stages see each other's artifacts, never their
- * transcripts. The session is saved after every stage, and every stage run is recorded (tokens, cost, tool calls,
- * the manifest of what the model saw). A conversation can also start from a library widget, to change it
- * ({@link #createModify}).
+ * This class owns what every kind shares - Intake, locking, streaming, recording, approval; a {@link SkillKind} owns
+ * the stages after Intake. Stages see each other's artifacts, never their transcripts. The session is saved after
+ * every stage, and every stage run is recorded (tokens, cost, tool calls, the manifest of what the model saw). A
+ * conversation can also start from a library widget, to change it ({@link #createModify}).
  */
 @Slf4j
 @Service
@@ -43,10 +46,7 @@ public class AssistantOrchestrator {
 
     private final AssistantSessionRepository sessions;
     private final IntakeStage intake;
-    private final BuildStage build;
-    private final ReviewStage review;
-    private final PresentStage present;
-    private final ProposalBuilder proposals;
+    private final SkillTemplateRegistry templates;
     private final WidgetLibrary library;
     private final WidgetWorkflow workflow;
     private final WidgetDefinitionRepository definitions;
@@ -58,8 +58,7 @@ public class AssistantOrchestrator {
     /** The session submitting on this thread: its own decisions are recorded by {@link #submit}, not the listener. */
     private final ThreadLocal<String> submitting = new ThreadLocal<>();
 
-    static final Map<String, String> LABELS = Map.of("intake", "Understanding the request", "build", "Finding the data",
-            "review", "Checking the numbers", "present", "Designing the widget");
+    static final String INTAKE_LABEL = "Understanding the request";
 
     /** Adding a widget the requested review could not verify needs the banker's explicit confirmation. */
     public static class ConfirmationRequired extends RuntimeException {
@@ -72,49 +71,35 @@ public class AssistantOrchestrator {
     }
 
     public AssistantSession create(String layoutId, String pageId, Map<String, String> params, String owner) {
+        return create(layoutId, pageId, params, owner, null, null);
+    }
+
+    /**
+     * A new conversation on a page, guided by a Skills Studio template (null: Custom widget) with the values the banker
+     * gave for its inputs. The template must fit the page.
+     */
+    public AssistantSession create(String layoutId, String pageId, Map<String, String> params, String owner, String templateId,
+                                   Map<String, String> inputs) {
+        String layout = layoutId == null ? "default" : layoutId;
+        SkillTemplate t = templates.forSession(templateId);
+        Layout.Page page = layouts.get(layout).page(pageId);
+        if (page == null) throw new NoSuchElementException("page " + pageId);
+        if (!t.fits(page))
+            throw new IllegalArgumentException("the " + t.title() + " template is for " + String.join(" or ", t.pageScopes())
+                    + " pages; " + page.getTitle() + " is a " + SkillTemplate.pageScope(page) + " page");
         AssistantSession s = new AssistantSession();
         s.setId(UUID.randomUUID().toString());
         s.setOwner(owner);
-        s.setLayoutId(layoutId == null ? "default" : layoutId);
+        s.setLayoutId(layout);
         s.setPageId(pageId);
         if (params != null) s.setParams(new LinkedHashMap<>(params));
+        s.setTemplateId(t.id());
+        s.setTemplateVersion(t.version());
+        s.setKind(t.kind());
+        s.setInputs(templates.checkInputs(t, inputs));
         s.setCreatedAt(Instant.now());
         s.setUpdatedAt(Instant.now());
         return sessions.save(s);
-    }
-
-    /** The session, if it belongs to {@code actorId}; someone else's conversation is reported as not found. */
-    public AssistantSession get(String id, String actorId) {
-        AssistantSession s = get(id);
-        if (s.getOwner() != null && !s.getOwner().equals(actorId)) throw new NoSuchElementException("assistant session " + id);
-        return s;
-    }
-
-    public AssistantSession get(String id) {
-        return sessions.findById(id).orElseThrow(() -> new NoSuchElementException("assistant session " + id));
-    }
-
-    /** Handles a banker message end to end, streaming progress to {@code events}. */
-    public void message(String sessionId, String text, Map<String, String> params, AssistantEvents events) {
-        if (text == null || text.isBlank()) throw new IllegalArgumentException("the message is empty");
-        withLock(sessionId, () -> {
-            AssistantSession s = get(sessionId);
-            if (params != null && !params.isEmpty()) s.setParams(new LinkedHashMap<>(params));
-            s.getTurns().add(new AssistantSession.Turn("user", text.trim(), "message", Instant.now()));
-            run(s, events, () -> handleMessage(s, text.trim(), events));
-            return null;
-        });
-    }
-
-    /** The banker asked to verify the current proposal (the opt-in review). */
-    public void verify(String sessionId, AssistantEvents events) {
-        withLock(sessionId, () -> {
-            AssistantSession s = get(sessionId);
-            if (s.getSpec() == null) throw new IllegalArgumentException("there is no proposed widget to verify");
-            s.getTurns().add(new AssistantSession.Turn("user", "Verify the numbers.", "message", Instant.now()));
-            run(s, events, () -> runReview(s, events));
-            return null;
-        });
     }
 
     /**
@@ -158,6 +143,46 @@ public class AssistantOrchestrator {
         return sessions.save(s);
     }
 
+    public AssistantSession get(String id) {
+        return sessions.findById(id).orElseThrow(() -> new NoSuchElementException("assistant session " + id));
+    }
+
+    /** Handles a banker message end to end, streaming progress to {@code events}. */
+    public void message(String sessionId, String text, Map<String, String> params, AssistantEvents events) {
+        if (text == null || text.isBlank()) throw new IllegalArgumentException("the message is empty");
+        withLock(sessionId, () -> {
+            AssistantSession s = get(sessionId);
+            if (params != null && !params.isEmpty()) s.setParams(new LinkedHashMap<>(params));
+            s.getTurns().add(new AssistantSession.Turn("user", text.trim(), "message", Instant.now()));
+            run(s, events, ops -> handleMessage(skillRun(s), text.trim(), ops));
+            return null;
+        });
+    }
+
+    /** The banker asked to verify the current proposal (the opt-in review). */
+    public void verify(String sessionId, AssistantEvents events) {
+        withLock(sessionId, () -> {
+            AssistantSession s = get(sessionId);
+            if (s.getSpec() == null) throw new IllegalArgumentException("there is no proposed widget to verify");
+            s.getTurns().add(new AssistantSession.Turn("user", "Verify the numbers.", "message", Instant.now()));
+            run(s, events, ops -> { SkillRun r = skillRun(s); kind(r).verify(r, ops); });
+            return null;
+        });
+    }
+
+    /** The session, if it belongs to {@code actorId}; someone else's conversation is reported as not found. */
+    public AssistantSession get(String id, String actorId) {
+        AssistantSession s = get(id);
+        if (s.getOwner() != null && !s.getOwner().equals(actorId)) throw new NoSuchElementException("assistant session " + id);
+        return s;
+    }
+
+    /** The template guiding a session. */
+    public SkillTemplate template(AssistantSession s) { return templates.forSession(s.getTemplateId()); }
+
+    /** The stage labels of a session's kind, Intake first. */
+    public Map<String, String> stageLabels(AssistantSession s) { return labels(kind(skillRun(s))); }
+
     /**
      * Add &amp; share. A new widget is saved to the owner's personal library, placed on the session's page where only they
      * see it, and shared with the Reviewers (with an optional note); a Reviewer's own is approved at once and goes live
@@ -186,12 +211,10 @@ public class AssistantOrchestrator {
             }
             if ("failed".equals(s.getReviewState()) && !confirmUnverified)
                 throw new ConfirmationRequired("the review could not verify this widget; confirm to add it anyway");
-            ObjectNode spec = (ObjectNode) read(s.getSpec());
-            ObjectNode prov = spec.putObject("provenance");
-            prov.put("sessionId", s.getId());
-            JsonNode brief = s.getBrief() == null ? null : read(s.getBrief());
-            if (brief != null) prov.put("question", brief.path("question").asText());
-            prov.put("reviewed", s.getReviewState());
+            SkillRun r = skillRun(s);
+            SkillKind kind = kind(r);
+            ObjectNode spec = kind.prepare(r);
+            WidgetDefinition.SkillOrigin skill = new WidgetDefinition.SkillOrigin(kind.id(), r.template().id(), r.template().version());
 
             WidgetSubmission previous = s.getSubmissionId() == null ? null : workflow.get(s.getSubmissionId());
             if (previous != null && WidgetSubmission.REJECTED.equals(previous.getStatus()))
@@ -216,7 +239,7 @@ public class AssistantOrchestrator {
                     } else {
                         id = uniqueId(spec.path("id").asText());
                         spec.put("id", id);
-                        library.create(spec, "assistant", owner, WidgetDefinition.PERSONAL, s.getLayoutId(), s.getPageId(), s.getParams());
+                        library.create(spec, "assistant", owner, WidgetDefinition.PERSONAL, s.getLayoutId(), s.getPageId(), s.getParams(), skill);
                         placement.placeDefinition(s.getLayoutId(), s.getPageId(), id, "assistant", owner);
                         s.setPlacedDefinitionId(id);
                     }
@@ -305,120 +328,55 @@ public class AssistantOrchestrator {
     }
 
     // ------------------------------------------------------------------ flows
-    private void handleMessage(AssistantSession s, String text, AssistantEvents events) {
-        Instant deadline = deadline();
-        JsonNode out = stage(s, "intake", events, rec -> intake.run(s, text, rec, deadline));
+    private void handleMessage(SkillRun r, String text, StageOps ops) {
+        AssistantSession s = r.session();
+        List<SkillTemplate> others = redirectTargets(r);
+        JsonNode out = ops.stage("intake", rec -> intake.run(s, text, r.template(), others, rec, ops.deadline()));
         String outcome = out.path("outcome").asText();
         String message = out.path("message").asText();
+        SkillKind kind = kind(r);
         switch (outcome) {
-            case "clarify", "answer", "decline" -> reply(s, events, message, outcome);
+            case "clarify", "answer", "decline" -> ops.reply(message, outcome);
+            case "redirect" -> {
+                ops.reply(message, outcome);
+                s.getTurns().get(s.getTurns().size() - 1).setTemplateId(out.path("suggestedTemplateId").asText());
+            }
             case "reuse" -> {
                 var d = definitions.findById(out.path("reuseDefinitionId").asText()).orElseThrow();
-                ObjectNode p = proposals.reuse(d, s.getParams());
-                propose(s, events, p, message);
+                ops.propose(kind.reuseProposal(d, s.getParams()), message);
             }
-            case "verify" -> runReview(s, events);
-            default -> buildAndPresent(s, out, text, events, deadline);
+            case "verify" -> kind.verify(r, ops);
+            default -> kind.proceed(r, out, text, ops);
         }
     }
 
-    private void buildAndPresent(AssistantSession s, JsonNode out, String text, AssistantEvents events, Instant deadline) {
-        JsonNode brief = out.path("brief");
-        List<String> changed = new ArrayList<>();
-        out.path("changed").forEach(c -> changed.add(c.asText()));
-        boolean presentationOnly = s.getSpec() != null && s.getData() != null && !changed.isEmpty()
-                && changed.stream().allMatch("presentation"::equals);
-        s.setBrief(brief.toString());
-        events.emit("message", Map.of("text", out.path("message").asText(), "kind", "ack"));
-        AssistantTools.Context ctx = context(s);
-
-        String request = s.getReviewerFeedback() == null ? text
-                : text + "\n\nThe Reviewer gave this feedback to revise the widget: " + s.getReviewerFeedback();
-        JsonNode data;
-        if (presentationOnly) {
-            data = read(s.getData());
-        } else {
-            BuildStage.Revision rev = s.getData() == null ? null : new BuildStage.Revision(s.getData(), request, null);
-            data = stage(s, "build", events, rec -> build.run(brief, rev, ctx, rec, deadline, events));
-            s.setData(data.toString());
-            s.setReviewState("none");
-            s.setReview(null);
-        }
-        presentAndPropose(s, brief, data, presentationOnly ? request : null, events, deadline, false);
-    }
-
-    private void runReview(AssistantSession s, AssistantEvents events) {
-        Instant deadline = deadline();
-        if (s.getSpec() == null || s.getData() == null) {
-            reply(s, events, "There is no proposed widget to verify yet.", "answer");
-            return;
-        }
-        JsonNode brief = read(s.getBrief());
-        JsonNode data = read(s.getData());
-        AssistantTools.Context ctx = context(s);
-        ReviewStage.Result r = stage(s, "review", events, rec -> review.run(brief, data, ctx, rec, deadline, events));
-        s.setReview(r.review().toString());
-        if (r.passed()) {
-            s.setReviewState("passed");
-            ObjectNode p = (ObjectNode) read(s.getProposal());
-            ObjectNode rv = p.putObject("review");
-            rv.put("state", "passed");
-            rv.put("summary", r.review().path("summary").asText());
-            rv.set("checks", r.review().path("checks"));
-            rv.set("independentChecks", r.review().path("independentChecks"));
-            rv.set("issues", r.review().path("issues"));
-            propose(s, events, p, "The review confirmed the numbers: " + r.review().path("summary").asText());
-            return;
-        }
-        // the review found problems: rebuild with its findings, redesign, and flag the result as not verified
-        s.setReviewState("failed");
-        String findings = r.review().path("issues").toPrettyString();
-        JsonNode rebuilt = stage(s, "build", events, rec -> build.run(brief, new BuildStage.Revision(s.getData(), null, findings), ctx, rec, deadline, events));
-        s.setData(rebuilt.toString());
-        presentAndPropose(s, brief, rebuilt, null, events, deadline, true);
-    }
-
-    private void presentAndPropose(AssistantSession s, JsonNode brief, JsonNode data, String changeRequest, AssistantEvents events,
-                                   Instant deadline, boolean revisedAfterReview) {
-        AssistantTools.Context ctx = context(s);
-        PresentStage.Result pr = stage(s, "present", events, rec -> present.run(brief, data, changeRequest, ctx, rec, deadline));
-        s.setView(pr.design().toString());
-        s.setSpec(pr.checked().spec().toString());
-        JsonNode review = s.getReview() == null ? null : read(s.getReview());
-        ObjectNode p = proposals.newWidget(brief, data, pr.checked().spec(), pr.checked().report(), s.getReviewState(), review, revisedAfterReview);
-        String text = (revisedAfterReview ? "The review found problems, so I revised the data (not re-reviewed). " : "")
-                + "Here's a proposal: \"" + p.path("title").asText() + "\" - " + p.path("description").asText();
-        propose(s, events, p, text);
+    /**
+     * The templates a templated run may send an out-of-scope request to: the others that fit the page. A Custom widget
+     * run takes any request, so it has none (and its Intake context stays as it was before templates).
+     */
+    private List<SkillTemplate> redirectTargets(SkillRun r) {
+        if (r.template().silentOn("intake")) return List.of();
+        Layout.Page page = layouts.get(r.session().getLayoutId()).page(r.session().getPageId());
+        return templates.forPage(page).stream().filter(t -> !t.id().equals(r.template().id())).toList();
     }
 
     // ------------------------------------------------------------------ plumbing
-    private interface StageCall<T> { T call(RunRecorder rec); }
+    private SkillRun skillRun(AssistantSession s) { return SkillRun.of(s, template(s)); }
 
-    /** Runs one stage: streams start/finish, records the run, saves the session. */
-    private <T> T stage(AssistantSession s, String name, AssistantEvents events, StageCall<T> call) {
-        s.setStage(name);
-        events.emit("stage", Map.of("stage", name, "label", LABELS.get(name), "status", "started"));
-        RunRecorder rec = new RunRecorder(name, props);
-        try {
-            T out = call.call(rec);
-            s.getRuns().add(rec.finish("ok", null));
-            events.emit("stage", Map.of("stage", name, "label", LABELS.get(name), "status", "done"));
-            return out;
-        } catch (RuntimeException e) {
-            s.getRuns().add(rec.finish("failed", e.getMessage()));
-            events.emit("stage", Map.of("stage", name, "label", LABELS.get(name), "status", "failed"));
-            throw e;
-        } finally {
-            s.setUpdatedAt(Instant.now());
-            sessions.save(s);
-        }
+    private SkillKind kind(SkillRun r) { return templates.kind(r.template()); }
+
+    private static Map<String, String> labels(SkillKind kind) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("intake", INTAKE_LABEL);
+        m.putAll(kind.stageLabels());
+        return m;
     }
 
-    private void run(AssistantSession s, AssistantEvents events, Runnable body) {
+    private void run(AssistantSession s, AssistantEvents events, Consumer<StageOps> body) {
         s.setStatus(AssistantSession.RUNNING);
         sessions.save(s);
         try {
-            body.run();
+            body.accept(new Ops(s, events, labels(kind(skillRun(s))), Instant.now().plusSeconds(props.getRunTimeoutSeconds())));
         } catch (StageFailure | LlmException | SourceException | IllegalArgumentException e) {
             log.info("assistant session {} stopped: {}", s.getId(), e.getMessage());
             fail(s, events, e.getMessage());
@@ -433,31 +391,74 @@ public class AssistantOrchestrator {
         }
     }
 
-    private void reply(AssistantSession s, AssistantEvents events, String text, String kind) {
-        s.getTurns().add(new AssistantSession.Turn("assistant", text, kind, Instant.now()));
-        s.setStatus(AssistantSession.AWAITING_USER);
-        events.emit("message", Map.of("text", text, "kind", kind));
-    }
+    /** The orchestrator's side of one run, lent to the skill kind. */
+    private final class Ops implements StageOps {
+        private final AssistantSession s;
+        private final AssistantEvents events;
+        private final Map<String, String> labels;
+        private final Instant deadline;
 
-    private void propose(AssistantSession s, AssistantEvents events, ObjectNode proposal, String text) {
-        if (s.getModifies() != null && "new".equals(proposal.path("kind").asText())) {
-            proposal.put("modifies", s.getModifies());
-            proposal.put("baseVersion", s.getModifiesVersion());
+        Ops(AssistantSession s, AssistantEvents events, Map<String, String> labels, Instant deadline) {
+            this.s = s;
+            this.events = events;
+            this.labels = labels;
+            this.deadline = deadline;
         }
-        s.setProposal(proposal.toString());
-        s.getTurns().add(new AssistantSession.Turn("assistant", text, "proposal", Instant.now()));
-        s.setStatus(AssistantSession.PROPOSED);
-        events.emit("proposal", proposal);
+
+        @Override
+        public <T> T stage(String name, StageCall<T> call) {
+            String label = labels.getOrDefault(name, name);
+            s.setStage(name);
+            events.emit("stage", Map.of("stage", name, "label", label, "status", "started"));
+            RunRecorder rec = new RunRecorder(name, props);
+            try {
+                T out = call.call(rec);
+                s.getRuns().add(rec.finish("ok", null));
+                events.emit("stage", Map.of("stage", name, "label", label, "status", "done"));
+                return out;
+            } catch (RuntimeException e) {
+                s.getRuns().add(rec.finish("failed", e.getMessage()));
+                events.emit("stage", Map.of("stage", name, "label", label, "status", "failed"));
+                throw e;
+            } finally {
+                s.setUpdatedAt(Instant.now());
+                sessions.save(s);
+            }
+        }
+
+        @Override
+        public void reply(String text, String kind) {
+            s.getTurns().add(new AssistantSession.Turn("assistant", text, kind, Instant.now()));
+            s.setStatus(AssistantSession.AWAITING_USER);
+            events.emit("message", Map.of("text", text, "kind", kind));
+        }
+
+        @Override
+        public void propose(ObjectNode proposal, String text) {
+            SkillTemplate t = template(s);
+            proposal.put("skillKind", t.kind());
+            proposal.putObject("template").put("id", t.id()).put("version", t.version()).put("title", t.title());
+            if (s.getModifies() != null && "new".equals(proposal.path("kind").asText())) {
+                proposal.put("modifies", s.getModifies());
+                proposal.put("baseVersion", s.getModifiesVersion());
+            }
+            s.setProposal(proposal.toString());
+            s.getTurns().add(new AssistantSession.Turn("assistant", text, "proposal", Instant.now()));
+            s.setStatus(AssistantSession.PROPOSED);
+            events.emit("proposal", proposal);
+        }
+
+        @Override
+        public AssistantEvents events() { return events; }
+
+        @Override
+        public Instant deadline() { return deadline; }
     }
 
     private void fail(AssistantSession s, AssistantEvents events, String message) {
         s.getTurns().add(new AssistantSession.Turn("assistant", message, "error", Instant.now()));
         s.setStatus(s.getProposal() != null ? AssistantSession.PROPOSED : AssistantSession.FAILED);
         events.emit("error", Map.of("message", message));
-    }
-
-    private AssistantTools.Context context(AssistantSession s) {
-        return new AssistantTools.Context(s.getLayoutId(), s.getPageId(), s.getParams());
     }
 
     private String uniqueId(String base) {
@@ -513,8 +514,6 @@ public class AssistantOrchestrator {
         a.set("sampleParams", mapper.valueToTree(r.sampleParams()));
         return a.toString();
     }
-
-    private Instant deadline() { return Instant.now().plusSeconds(props.getRunTimeoutSeconds()); }
 
     private JsonNode read(String json) {
         try {

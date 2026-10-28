@@ -19,6 +19,9 @@ The **widget assistant** (Claude) builds widgets from a plain request, with the 
 |---|---|
 | **Command Center** | The whole book, through a period and filters (region, segment, tier, RM, line of business): exposure, deposits, pipeline, monthly revenue and revenue mix. |
 | **Client 360** | Built entirely from spec widgets over `bank`, scoped by a client picker (`?clientId=`). |
+| **Pre-call Brief** | A static brief for one client (profile, ownership, holdings, covenants, meetings, balances, payments, industry context), read from `bank` including the `precall_*` collections. |
+| **New Issue (High Yield)** | Deal search and transaction details over the seeded `hy_*` collections. |
+| **Signals** | Placeholder. |
 
 ---
 
@@ -279,6 +282,30 @@ Static context goes in the system prompt. It is generated deterministically from
 
 Every stage run records a **manifest** of what the model was given (block, source, size, hash), plus the dynamic message verbatim, its tokens, cost and tool calls. You can see these under **Details** in the drawer or at `GET /api/assistant/sessions/{id}/runs`. `ContextAssemblyTest` writes each stage's full request to `backend/target/assistant-context/<stage>.md` for review.
 
+### Skills and templates
+A widget is one **kind of skill**. Insights (summaries of figures, rendered by code) and actions (buttons that run app-internal automations) are planned next. Every assistant run builds one kind, guided by a **Skills Studio template**: `backend/src/main/resources/skills/templates/*.json`, validated against `skills/skill-template.schema.json` and checked at startup by `SkillTemplateRegistry`.
+
+A template carries:
+- the pages it fits (`pageScopes`);
+- form `inputs`, whose values reach Intake as `<skill_inputs>`;
+- per-stage `guidance`, appended as one `template-guidance` block after the shared, cached system blocks;
+- worked `examples` that replace a stage's defaults;
+- `constraints` (scope, collections, primitives, max rows), enforced by `TemplateGate` inside each stage's gate, so a breach goes back to Claude as a correction;
+- brief `defaults`, which fill fields Intake left open and are listed as assumptions.
+
+**Skills Studio** (`/studio`, Builder/Reviewer): a grid of templates. Picking one asks for its inputs and a page that fits, then opens the assistant there with the template chosen. The assistant's empty state also has a **Start from** picker, limited to the templates that fit the page.
+
+If a templated run gets a request the template doesn't build, Intake answers `redirect` with a `suggestedTemplateId` taken from the `<other_templates>` it was shown. The chat then offers **Switch to …**, which starts a new conversation with that template and the same request. Custom widget runs take any request, so they never redirect.
+
+`custom-widget` is the free-form template. It adds nothing, so its prompts are byte-identical to running with no template. Sessions started without a `templateId` use it. Saved definitions record `kind`, `templateId` and `templateVersion`. Kind-specific flow lives behind `SkillKind` (`WidgetSkill` today).
+
+### Roles and maker-checker
+Three demo roles, chosen from the sidebar's **Viewing as** dropdown (the `X-AIPB-Role` header, no login): **Banker** (dashboards and the library only), **Builder** (the maker) and **Reviewer** (the checker).
+- **Add & share** (approving a proposal) saves the widget to the Builder's personal library and places it where only they see it, and submits it for review. A Reviewer's own widget is approved at once.
+- The **Skills** window lists widgets in progress, approved and stock widgets; Reviewers get the approval queue (approve, feedback & revise, reject). Feedback joins the conversation, and the Builder's next message revises the widget.
+- **Modify** starts a conversation from a library widget (always a Custom widget run). The change waits in `aipb.widget_submissions`; everyone keeps seeing the current version until it's approved.
+- Every approved version is kept in `aipb.widget_versions` and can be previewed or restored.
+
 ### Tools
 
 Build and Review use read-only tools. All of them go through `SourceData`, so the database stays pinned to `bank`, results are capped, and outputs are trimmed to a few rows:
@@ -349,18 +376,26 @@ cd backend && mvn test -Dgroups=eval -Dsurefire.excludedGroups= -Daipb.eval.limi
 | GET | `/api/layouts/{id}/pages/{pageId}/context/filters/{dimension}/options` | Choices for one of a page's filters |
 | GET | `/api/widgets/placed/{layoutId}/{pageId}/{widgetId}/data?<page values>` | Run a placed widget in its page's context (client, period, filters, placement bindings): rows, view, applied context, notes |
 | GET | `/api/assistant/status` | Assistant enabled, model, effort per stage |
-| POST | `/api/assistant/sessions` `{layoutId, pageId, params}` | Start a conversation on a page |
+| GET | `/api/skills/templates?pageId=` | Skills Studio templates (Builder/Reviewer), optionally only those that fit a page |
+| GET | `/api/skills/templates/{id}` | One template: kind, summary, inputs, suggestions |
+| POST | `/api/assistant/sessions` `{layoutId, pageId, params, templateId, inputs, modifies}` | Start a conversation on a page, from a template (default `custom-widget`), or to change library widget `modifies` |
 | GET | `/api/assistant/sessions/{id}` | Conversation state (turns, status, proposal, cost) |
 | POST | `/api/assistant/sessions/{id}/messages` `{text, params}` | Send a message → **SSE**: `stage`, `activity`, `message`, `proposal`, `error`, `done` |
 | POST | `/api/assistant/sessions/{id}/verify` | Opt-in independent review → SSE |
-| POST | `/api/assistant/sessions/{id}/approve` `{confirmUnverified}` | Save the proposal to the library and place it |
+| POST | `/api/assistant/sessions/{id}/approve` `{confirmUnverified, note}` | Add & share: save to the personal library, place it for its owner, submit for review |
+| POST | `/api/assistant/sessions/{id}/submit` `{note}` | Share a personal widget for review |
+| GET | `/api/identity` | The acting role and the available roles |
+| GET | `/api/skills` | The Skills window for the caller: sections and how many need attention |
+| GET | `/api/submissions/{id}` · POST `/approve` · `/send-back` · `/reject` `{comment}` | One submission (preview, history, current version) and a Reviewer's decision |
+| GET | `/api/widgets/library/{id}/versions[/{v}]` · POST `/versions/{v}/restore` | Version history, one version's preview, restore |
+| GET | `/api/precall/clients` · `/api/precall/{clientId}` | Pre-call Brief: client list, one client's brief |
+| GET | `/api/new-issue/deals` · `/deals/{dealId}` | New Issue deals |
 | GET | `/api/assistant/sessions/{id}/runs` | Inspector: each stage run's context manifest, tokens, cost, tool calls |
 | POST | `/api/admin/reseed` | Wipe and reseed the app DB |
 
 ## Next steps
 
 - Run the evaluation, then tune effort per stage against it.
-- Edit placed widgets through the assistant (today it creates new ones and revises its own proposals).
 - Retire the legacy Client 360 code (the reference page is gone).
 
 All names and figures are **synthetic**. Security (SSO, entitlements) is out of scope for this local build.

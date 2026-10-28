@@ -81,12 +81,18 @@ public class WidgetLibrary implements ApplicationRunner {
      * personal widget is a draft: no version history until a Reviewer approves it (see {@link WidgetWorkflow}).
      */
     public Saved create(JsonNode spec, String author, String owner, String scope, String layoutId, String pageId, Map<String, String> params) {
+        return create(spec, author, owner, scope, layoutId, pageId, params, null);
+    }
+
+    /** As {@link #create(JsonNode, String, String, String, String, String, Map)}, recording the skill's kind and template. */
+    public Saved create(JsonNode spec, String author, String owner, String scope, String layoutId, String pageId, Map<String, String> params,
+                        WidgetDefinition.SkillOrigin origin) {
         String id = spec.path("id").asText();
         if (repo.existsById(id)) throw new DuplicateException("a widget '" + id + "' already exists; update it, or pick another id");
         Checked c = check(spec, 1, author, layoutId, pageId, params);
         if (!WidgetDefinition.PERSONAL.equals(scope))
-            return new Saved(publish(c, 1, WidgetDefinition.BUILT, WidgetVersion.APPROVED, null, null, null, owner), c.report());
-        return new Saved(repo.save(draft(c, owner, null, null)), c.report());
+            return new Saved(publish(c, 1, WidgetDefinition.BUILT, WidgetVersion.APPROVED, null, null, null, owner, origin), c.report());
+        return new Saved(repo.save(draft(c, owner, null, null, origin)), c.report());
     }
 
     /** A revised draft of the actor's own personal widget; ownership and review carry over. */
@@ -97,7 +103,7 @@ public class WidgetLibrary implements ApplicationRunner {
         if (current.global()) throw new IllegalArgumentException("'" + current.getTitle() + "' is in the global library; changes to it go through review");
         if ("rejected".equals(current.reviewStatus())) throw new IllegalArgumentException("'" + current.getTitle() + "' was rejected; build a new widget instead");
         Checked c = check(spec, 1, author, layoutId, pageId, params);
-        return new Saved(repo.save(draft(c, current.getOwner(), current.getReview(), current.getCreatedAt())), c.report());
+        return new Saved(repo.save(draft(c, current.getOwner(), current.getReview(), current.getCreatedAt(), current.skillOrigin())), c.report());
     }
 
     /**
@@ -132,7 +138,8 @@ public class WidgetLibrary implements ApplicationRunner {
         });
     }
 
-    private WidgetDefinition draft(Checked c, String owner, WidgetDefinition.Review review, Instant createdAt) {
+    private WidgetDefinition draft(Checked c, String owner, WidgetDefinition.Review review, Instant createdAt,
+                                   WidgetDefinition.SkillOrigin skill) {
         WidgetSpec s = c.parsed();
         WidgetDefinition d = new WidgetDefinition();
         d.setId(s.id());
@@ -147,6 +154,7 @@ public class WidgetLibrary implements ApplicationRunner {
         d.setAuthor(c.spec().path("provenance").path("author").asText(null));
         d.setOwner(owner);
         d.setReview(review);
+        d.setSkillOrigin(skill);
         d.setSpec(c.spec().toString());
         d.setCreatedAt(createdAt == null ? Instant.now() : createdAt);
         d.setUpdatedAt(Instant.now());
@@ -196,6 +204,12 @@ public class WidgetLibrary implements ApplicationRunner {
      */
     public WidgetDefinition publish(Checked c, int version, String origin, String source, String submissionId,
                                     Integer restoredFrom, String role, String owner) {
+        return publish(c, version, origin, source, submissionId, restoredFrom, role, owner, null);
+    }
+
+    /** As above; {@code skill} records the kind and template of a widget published for the first time (a later version keeps its own). */
+    public WidgetDefinition publish(Checked c, int version, String origin, String source, String submissionId,
+                                    Integer restoredFrom, String role, String owner, WidgetDefinition.SkillOrigin skill) {
         c.spec().put("version", version);
         WidgetSpec s = c.parsed();
         WidgetDefinition current = repo.findById(s.id()).orElse(null);
@@ -231,6 +245,7 @@ public class WidgetLibrary implements ApplicationRunner {
             current.getReview().setStatus("approved");
             d.setReview(current.getReview());
         }
+        d.setSkillOrigin(current != null ? current.skillOrigin() : skill);
         d.setSpec(c.spec().toString());
         d.setCreatedAt(current == null ? Instant.now() : current.getCreatedAt());
         d.setUpdatedAt(Instant.now());

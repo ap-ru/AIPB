@@ -221,6 +221,8 @@ public class WidgetController {
         m.put("review", d.reviewStatus());
         m.put("title", d.getTitle());
         m.put("description", d.getDescription());
+        m.put("kind", d.kind());
+        m.put("templateId", d.getTemplateId());
         m.put("primitive", d.getPrimitive());
         m.put("collection", d.getCollection());
         m.put("params", d.getParams());

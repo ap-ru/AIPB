@@ -41,8 +41,26 @@ public class WidgetDefinition {
     private String owner;        // actor id (e.g. demo-builder); "system" for stock widgets
     private String scope;        // personal | global (null: global - saved before roles existed)
     private Review review;       // the request to publish a personal widget to the global library
+    private String kind;         // the skill kind: widget (null: widget - saved before skills existed)
+    private String templateId;   // the Skills Studio template it was built from, if any
+    private Integer templateVersion;
     private Instant createdAt;
     private Instant updatedAt;
+
+    public static final String WIDGET = "widget";
+
+    /** Where a skill came from: its kind and the template that guided the assistant run (null for none). */
+    public record SkillOrigin(String kind, String templateId, Integer templateVersion) {}
+
+    public String kind() { return kind == null ? WIDGET : kind; }
+
+    public SkillOrigin skillOrigin() { return new SkillOrigin(kind, templateId, templateVersion); }
+
+    public void setSkillOrigin(SkillOrigin o) {
+        kind = o == null ? null : o.kind();
+        templateId = o == null ? null : o.templateId();
+        templateVersion = o == null ? null : o.templateVersion();
+    }
 
     public boolean global() { return scope == null || GLOBAL.equals(scope); }
 
