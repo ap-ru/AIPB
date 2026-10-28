@@ -19,7 +19,6 @@ The **widget assistant** (Claude) builds widgets from a plain request, with the 
 |---|---|
 | **Command Center** | The whole book, through a period and filters (region, segment, tier, RM, line of business): exposure, deposits, pipeline, monthly revenue and revenue mix. |
 | **Client 360** | Built entirely from spec widgets over `bank`, scoped by a client picker (`?clientId=`). |
-| **Client 360 (reference)** | The original hand-built view on the app's demo data, kept until the spec-driven page reaches parity. |
 
 ---
 
@@ -324,7 +323,7 @@ cd backend && mvn test -Dgroups=eval -Dsurefire.excludedGroups= -Daipb.eval.limi
                                    bank: synthetic source data + _catalog (read only, as bank_reader)
 ```
 
-`layouts/default` holds the pages, their parameters (e.g. Client 360's `clientId` picker, whose choices come from `bank.clients`) and their widgets. The React shell renders each widget's `type` from [frontend/src/widgets/registry.jsx](frontend/src/widgets/registry.jsx). `spec` renders a library definition. The legacy types `kpi-strip`, `client-360` and `client-table` are also declared in [WidgetManifest.java](backend/src/main/java/com/aipb/service/WidgetManifest.java) and serve only the reference page.
+`layouts/default` holds the pages, their parameters (e.g. Client 360's `clientId` picker, whose choices come from `bank.clients`) and their widgets. The React shell renders each widget's `type` from [frontend/src/widgets/registry.jsx](frontend/src/widgets/registry.jsx). `spec` renders a library definition. The legacy types `kpi-strip`, `client-360` and `client-table` are also declared in [WidgetManifest.java](backend/src/main/java/com/aipb/service/WidgetManifest.java) and are no longer placed on any default page.
 
 
 ## API
@@ -362,6 +361,6 @@ cd backend && mvn test -Dgroups=eval -Dsurefire.excludedGroups= -Daipb.eval.limi
 
 - Run the evaluation, then tune effort per stage against it.
 - Edit placed widgets through the assistant (today it creates new ones and revises its own proposals).
-- Retire the reference page and the legacy Client 360 code once the spec-driven page covers everything.
+- Retire the legacy Client 360 code (the reference page is gone).
 
 All names and figures are **synthetic**. Security (SSO, entitlements) is out of scope for this local build.

@@ -117,13 +117,6 @@ public final class Defaults {
                 spec("client-contacts", "Key contacts", 4));
         client.getParams().add(param("clientId", "Client", "clients", "clientId", "name"));
         l.getPages().add(client);
-
-        // The hand-built original, kept as the reference until the spec-driven page reaches parity.
-        l.getPages().add(page("client-360", "Client 360 (reference)", "users",
-                "The original hand-built view (app demo data) - the reference for the spec-driven Client 360", true,
-                widget("kpi-strip", "Book overview", 12, "set", "book"),
-                widget("client-360", "Client 360 · relationship view", 12, "sort", "revenue"),
-                widget("client-table", "Client book", 12, "sort", "revenue")));
         return l;
     }
 }
