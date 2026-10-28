@@ -283,7 +283,7 @@ Static context goes in the system prompt. It is generated deterministically from
 Every stage run records a **manifest** of what the model was given (block, source, size, hash), plus the dynamic message verbatim, its tokens, cost and tool calls. You can see these under **Details** in the drawer or at `GET /api/assistant/sessions/{id}/runs`. `ContextAssemblyTest` writes each stage's full request to `backend/target/assistant-context/<stage>.md` for review.
 
 ### Skills and templates
-A widget is one **kind of skill**. Insights (summaries of figures, rendered by code) and actions (buttons that run app-internal automations) are planned next. Every assistant run builds one kind, guided by a **Skills Studio template**: `backend/src/main/resources/skills/templates/*.json`, validated against `skills/skill-template.schema.json` and checked at startup by `SkillTemplateRegistry`.
+A widget is one **kind of skill**; an **insight** (a few sentences about figures, rendered by code) is another, and actions (buttons that run app-internal automations) are planned next. Every assistant run builds one kind, guided by a **Skills Studio template**: `backend/src/main/resources/skills/templates/*.json`, validated against `skills/skill-template.schema.json` and checked at startup by `SkillTemplateRegistry`.
 
 A template carries:
 - the pages it fits (`pageScopes`);
@@ -297,7 +297,10 @@ A template carries:
 
 If a templated run gets a request the template doesn't build, Intake answers `redirect` with a `suggestedTemplateId` taken from the `<other_templates>` it was shown. The chat then offers **Switch to …**, which starts a new conversation with that template and the same request. Custom widget runs take any request, so they never redirect.
 
-`custom-widget` is the free-form template. It adds nothing, so its prompts are byte-identical to running with no template. Sessions started without a `templateId` use it. Saved definitions record `kind`, `templateId` and `templateVersion`. Kind-specific flow lives behind `SkillKind` (`WidgetSkill` today).
+`custom-widget` is the free-form template. It adds nothing, so its prompts are byte-identical to running with no template; `ContextAssemblyTest.customWidgetSystemBlocksStayPinned` pins every stage's blocks by hash (`src/test/resources/assistant/system-blocks.sha256`). Sessions started without a `templateId` use it. Saved definitions record `kind`, `templateId` and `templateVersion`. Kind-specific flow lives behind `SkillKind`: `WidgetSkill` and `InsightSkill`, which share Build and the opt-in review (`DataSkill`) and differ in their design step.
+
+### Insights
+An insight is a spec like any widget, drawn by the **`narrative`** primitive: `view.statements` (text with slots, an optional `when` condition on the first row, a tone) and `view.figures`. Slots are `{column}`, `{column:format}` and `{column>0?up:down}`. The assistant writes the statements once, in the **Narrate** stage (`prompts/narrate.md`, `schemas/narrate.json`). `NarrativeRenderer` fills them on every view, so viewing an insight makes no model call. The validator checks every slot, condition and figure, and renders the statements on the sample: one that says nothing is refused. The data endpoints and previews return the rendered `narrative` next to the rows. Templates: `revenue-momentum` and `pipeline-outlook`. The `narrative` primitive is tagged `"skill": "insight"` in `primitives.json`, so it stays out of the widget stages' catalogs.
 
 ### Roles and maker-checker
 Three demo roles, chosen from the sidebar's **Viewing as** dropdown (the `X-AIPB-Role` header, no login): **Banker** (dashboards and the library only), **Builder** (the maker) and **Reviewer** (the checker).

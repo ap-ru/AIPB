@@ -32,12 +32,25 @@ class SkillTemplatesTest {
         @Override public ObjectNode prepare(SkillRun run) { return null; }
     };
 
-    private SkillTemplateRegistry shipped() { return new SkillTemplateRegistry(List.of(WIDGET), primitives, mapper); }
+    /** The insight kind's stages: the data is built as for a widget, then narrated. */
+    static final SkillKind INSIGHT = new SkillKind() {
+        @Override public String id() { return InsightSkill.ID; }
+        @Override public Map<String, String> stageLabels() { return Map.of("build", "", "review", "", "narrate", ""); }
+        @Override public void proceed(SkillRun run, JsonNode out, String text, StageOps ops) { }
+        @Override public void verify(SkillRun run, StageOps ops) { }
+        @Override public ObjectNode reuseProposal(WidgetDefinition d, Map<String, String> params) { return null; }
+        @Override public ObjectNode prepare(SkillRun run) { return null; }
+    };
+
+    private SkillTemplateRegistry shipped() { return new SkillTemplateRegistry(List.of(WIDGET, INSIGHT), primitives, mapper); }
 
     @Test
     void theShippedTemplatesLoadAndCustomWidgetIsSilentOnEveryStage() {
         SkillTemplateRegistry r = shipped();
-        assertThat(r.all()).extracting(SkillTemplate::id).contains("custom-widget", "exposure-vs-limit", "revenue-trend");
+        assertThat(r.all()).extracting(SkillTemplate::id).contains("custom-widget", "exposure-vs-limit", "revenue-trend",
+                "revenue-momentum", "pipeline-outlook");
+        assertThat(r.get("revenue-momentum").kind()).isEqualTo(InsightSkill.ID);
+        assertThat(r.get("revenue-momentum").guidance("narrate")).isNotBlank();
         SkillTemplate custom = r.get(SkillTemplate.CUSTOM_WIDGET);
         for (String stage : List.of("intake", "build", "review", "present")) assertThat(custom.silentOn(stage)).isTrue();
         assertThat(r.forSession(null)).isSameAs(custom); // sessions from before templates
@@ -87,7 +100,7 @@ class SkillTemplatesTest {
         Files.writeString(dir.resolve("schema.json"), """
                 {"id":"schema","version":0,"kind":"widget"}""");
 
-        assertThatThrownBy(() -> new SkillTemplateRegistry(List.of(WIDGET), primitives, mapper, "file:" + dir + "/*.json"))
+        assertThatThrownBy(() -> new SkillTemplateRegistry(List.of(WIDGET, INSIGHT), primitives, mapper, "file:" + dir + "/*.json"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("guidance for 'narrate'")
                 .hasMessageContaining("unknown primitive 'pie'")
@@ -105,7 +118,7 @@ class SkillTemplatesTest {
     void customWidgetIsRequired(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("only.json"), """
                 {"id":"only","version":1,"kind":"widget","title":"Only","summary":"s","icon":"x","category":"c","pageScopes":["book"]}""");
-        assertThatThrownBy(() -> new SkillTemplateRegistry(List.of(WIDGET), primitives, mapper, "file:" + dir + "/*.json"))
+        assertThatThrownBy(() -> new SkillTemplateRegistry(List.of(WIDGET, INSIGHT), primitives, mapper, "file:" + dir + "/*.json"))
                 .hasMessageContaining("the custom-widget template is required");
     }
 }

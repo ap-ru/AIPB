@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * A declarative widget, as defined by resources/widgets/widget-spec.schema.json (format 2): what data it shows and how
- * one design-system primitive shows it ({@link View}). The data is either
+ * one design-system primitive shows it ({@link View}) - for an insight, the narrative primitive's statements. The data is either
  * <ul>
  *   <li>a semantic {@code query} - metrics, dimensions, a window - whose columns (type, unit, format, meaning) are
  *       derived from the semantic layer, with optional label / tone {@code columns} overrides; or</li>
@@ -70,7 +70,16 @@ public record WidgetSpec(String id, Integer specVersion, Integer version, String
     public record View(String primitive, String value, String compare, String secondary, String x, List<String> y,
                        String orientation, Boolean stacked, List<String> columns, String title, String subtitle,
                        String badge, String meta, String reference, String emphasis, String polarity, String headline,
-                       Double warnAt, String series) {}
+                       Double warnAt, String series, List<Statement> statements, List<String> figures) {}
+
+    /** A narrative statement (an insight): text with slots, shown when {@code when} holds (always when null); see NarrativeRenderer. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Statement(When when, String text, String tone) {}
+
+    /** A condition on the first row: {@code column op value}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record When(String column, String op, JsonNode value) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record LayoutHint(Integer span) {}

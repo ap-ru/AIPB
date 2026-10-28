@@ -18,8 +18,15 @@ public record ValidationReport(boolean ok, List<Issue> errors, List<Issue> warni
 
     public record Issue(String code, String path, String message) {}
 
-    /** The first rows of the live run, with the columns as the widget will show them; {@code notes} from the semantic layer. */
+    /**
+     * The first rows of the live run, with the columns as the widget will show them; {@code notes} from the semantic
+     * layer; {@code narrative}: what an insight says for the sample.
+     */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public record Preview(List<ResultSet.Column> columns, JsonNode rows, int count, Integer total, boolean truncated,
-                          String asOfDate, List<String> notes) {}
+                          String asOfDate, List<String> notes, NarrativeRenderer.Narrative narrative) {
+        public Preview(List<ResultSet.Column> columns, JsonNode rows, int count, Integer total, boolean truncated, String asOfDate, List<String> notes) {
+            this(columns, rows, count, total, truncated, asOfDate, notes, null);
+        }
+    }
 }

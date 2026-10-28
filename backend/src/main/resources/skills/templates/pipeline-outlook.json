@@ -1,0 +1,21 @@
+{
+  "id": "pipeline-outlook",
+  "version": 1,
+  "kind": "insight",
+  "title": "Pipeline outlook",
+  "summary": "What the open pipeline is likely to bring in: total and weighted value, how much is in Commit, and how many deals have stalled.",
+  "icon": "spark",
+  "category": "Pipeline",
+  "pageScopes": ["client", "book"],
+  "guidance": {
+    "intake": "This template builds an insight: sentences about the open sales pipeline, not a chart. Scope follows the page: client on a page that supplies clientId, book otherwise. Only open deals count (not Closed Won or Closed Lost). A request for a deal list or a chart by stage is declined with a suggestion of the Custom widget template.",
+    "build": "Return exactly one row from opportunities over open deals (stage not Closed Won / Closed Lost): pipelineUsd (USD, sum of expectedRevenueUsd), weightedPipelineUsd (USD, sum of expectedRevenueUsd * probability / 100), commitUsd (USD, expectedRevenueUsd where forecastCategory is Commit), openDeals (count) and stalledDeals (count, daysInStage > 45). Use 0, not null, for a sum or count over no deals.",
+    "narrate": "Headline (always): the open pipeline and its weighted value. Then: how much is in Commit (good when commitUsd > 0); stalled deals as a concern (warn when stalledDeals >= 1, bad when >= 3); and a plain statement when there are no open deals (openDeals = 0, info). Figures: weightedPipelineUsd, commitUsd."
+  },
+  "constraints": {
+    "primitives": ["narrative"],
+    "collections": ["opportunities"],
+    "maxRows": 1
+  },
+  "suggestions": ["What's the pipeline outlook for this client?", "Summarize the open pipeline across the book"]
+}

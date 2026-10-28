@@ -21,7 +21,7 @@ export default function SpecWidget({ config, widget, pageId, pageParams }) {
   else if (q.loading && !q.data) body = <Skeleton />;
   else if (q.error) body = <div className="error-box">⚠ {String(q.error.message || q.error)}</div>;
   else if (!q.data.rows.length) body = <div className="empty soft">No data for this selection.</div>;
-  else body = <SpecView view={q.data.view} columns={q.data.columns} rows={q.data.rows} truncated={q.data.truncated} total={q.data.total} />;
+  else body = <SpecView view={q.data.view} columns={q.data.columns} rows={q.data.rows} truncated={q.data.truncated} total={q.data.total} narrative={q.data.narrative} />;
   return (
     <div className={'card-body spec-body' + (q.loading && q.data ? ' refreshing' : '')}>
       {q.data?.description && (

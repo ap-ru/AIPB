@@ -232,4 +232,53 @@ class WidgetSpecValidatorTest {
         assertThat(r.ok()).isTrue();
         assertThat(r.sampleParams()).containsEntry("clientId", "CL-0007");
     }
+
+    // ------------------------------------------------------------------ narrative (insights)
+    private ObjectNode insight(String statements) throws Exception {
+        return (ObjectNode) mapper.readTree("""
+                {"id":"revenue-momentum","title":"Revenue momentum","description":"Revenue over the last 12 closed months.",
+                 "params":[{"name":"clientId","type":"string"}],
+                 "data":{"collection":"revenue_monthly",
+                   "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$group":{"_id":null,"revenueT12mUsd":{"$sum":"$totalUsd"}}}],
+                   "columns":[{"name":"revenueT12mUsd","type":"number","unit":"USD","format":"currency","label":"Revenue (T12M)"},
+                              {"name":"revenueYoY","type":"number","unit":"ratio","format":"percent","label":"Change"}]},
+                 "view":{"primitive":"narrative","figures":["revenueT12mUsd"],"statements":%s}}""".formatted(statements));
+    }
+
+    @Test
+    void anInsightRendersItsStatementsOnTheSample() throws Exception {
+        returns("[{\"revenueT12mUsd\":4250000,\"revenueYoY\":0.124}]");
+        ValidationReport r = validator.validate(insight("""
+                [{"text":"Revenue over the last 12 months is {revenueT12mUsd}."},
+                 {"when":{"column":"revenueYoY","op":">","value":0},"text":"Up {revenueYoY} on the year before.","tone":"good"},
+                 {"when":{"column":"revenueYoY","op":"<","value":0},"text":"Down {revenueYoY}.","tone":"bad"}]"""), "default", "client", Map.of("clientId", "CL-0001"));
+        assertThat(r.ok()).as(r.errors().toString()).isTrue();
+        assertThat(r.preview().narrative().lines()).extracting(NarrativeRenderer.Line::text)
+                .containsExactly("Revenue over the last 12 months is $4.3M.", "Up 12% on the year before.");
+        assertThat(r.preview().narrative().figures()).extracting(NarrativeRenderer.Figure::text).containsExactly("$4.3M");
+    }
+
+    @Test
+    void anInsightsSlotsAndConditionsMustNameItsColumns() throws Exception {
+        returns("[{\"revenueT12mUsd\":4250000,\"revenueYoY\":0.124}]");
+        ValidationReport r = validator.validate(insight("""
+                [{"text":"Revenue is {revenue} and {revenueT12mUsd:shiny}."},
+                 {"when":{"column":"growth","op":">","value":0},"text":"Up.","tone":"good"}]"""), "default", "client", Map.of("clientId", "CL-0001"));
+        assertThat(r.ok()).isFalse();
+        assertThat(r.errors()).extracting(ValidationReport.Issue::message).anyMatch(m -> m.contains("{revenue} names 'revenue'"))
+                .anyMatch(m -> m.contains("asks for format 'shiny'")).anyMatch(m -> m.contains("names 'growth'"));
+        // a statement list is narrative-only
+        ObjectNode table = spec();
+        ((ObjectNode) table.get("view")).putArray("statements").addObject().put("text", "Hello");
+        assertThat(validator.validate(table, "default", "client", Map.of("clientId", "CL-0001")).errors())
+                .extracting(ValidationReport.Issue::path).contains("view.statements");
+    }
+
+    @Test
+    void anInsightThatSaysNothingForTheSampleIsRefused() throws Exception {
+        returns("[{\"revenueT12mUsd\":4250000,\"revenueYoY\":null}]");
+        ValidationReport r = validator.validate(insight("""
+                [{"when":{"column":"revenueYoY","op":">","value":0},"text":"Up {revenueYoY}.","tone":"good"}]"""), "default", "client", Map.of("clientId", "CL-0001"));
+        assertThat(r.errors()).extracting(ValidationReport.Issue::code).contains("narrative");
+    }
 }

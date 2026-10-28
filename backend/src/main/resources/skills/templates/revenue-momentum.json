@@ -1,0 +1,21 @@
+{
+  "id": "revenue-momentum",
+  "version": 1,
+  "kind": "insight",
+  "title": "Revenue momentum",
+  "summary": "A short read on revenue: the last 12 months, the change on the year before, and how much of it is fees - for the selected client, or across the book.",
+  "icon": "spark",
+  "category": "Revenue",
+  "pageScopes": ["client", "book"],
+  "guidance": {
+    "intake": "This template builds an insight: sentences about revenue momentum, not a chart. Scope follows the page: client on a page that supplies clientId, book otherwise. The window is the 12 most recent closed months against the 12 before them. A request for a chart, a ranking or a list is declined with a suggestion of the Revenue trend or Custom widget template.",
+    "build": "Return exactly one row from revenue_monthly (closed months only: exclude the month containing asOfDate): revenueT12mUsd (USD, the last 12 closed months), revenuePriorT12mUsd (USD, the 12 months before those), revenueYoY (ratio: (current - prior) / prior, null when prior is 0) and feeShare (ratio: fee revenue / total revenue over the last 12 months, null when revenue is 0).",
+    "narrate": "Headline (always): revenue over the last 12 months. Then: up or down on the prior 12 months with the change as a percent (good when up, warn when down by less than 10%, bad when down 10% or more); and the fee share when it is notable (info when at least 0.4, neutral otherwise). Figures: revenueT12mUsd, revenueYoY."
+  },
+  "constraints": {
+    "primitives": ["narrative"],
+    "collections": ["revenue_monthly"],
+    "maxRows": 1
+  },
+  "suggestions": ["How is revenue trending for this client?", "Summarize revenue momentum across the book"]
+}

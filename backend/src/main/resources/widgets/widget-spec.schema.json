@@ -163,7 +163,8 @@
             "table",
             "list",
             "meter",
-            "composition"
+            "composition",
+            "narrative"
           ]
         },
         "value": {
@@ -253,6 +254,73 @@
         "series": {
           "type": "string",
           "description": "bar/line: a text column whose values are the series (long-format rows, one y column)."
+        },
+        "statements": {
+          "type": "array",
+          "minItems": 1,
+          "description": "narrative: what the insight says, in order; the first statement shown is the headline.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "when": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "column",
+                  "op",
+                  "value"
+                ],
+                "description": "Shown only when the first row's column compares true; omit to always show.",
+                "properties": {
+                  "column": {
+                    "type": "string"
+                  },
+                  "op": {
+                    "enum": [
+                      ">",
+                      ">=",
+                      "<",
+                      "<=",
+                      "=",
+                      "!="
+                    ]
+                  },
+                  "value": {
+                    "type": [
+                      "number",
+                      "string",
+                      "boolean"
+                    ]
+                  }
+                }
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Plain words with slots: {column}, {column:format}, {column>0?word:word}."
+              },
+              "tone": {
+                "enum": [
+                  "good",
+                  "warn",
+                  "bad",
+                  "info",
+                  "neutral"
+                ]
+              }
+            }
+          }
+        },
+        "figures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "narrative: columns shown as figures beside the text."
         }
       }
     },

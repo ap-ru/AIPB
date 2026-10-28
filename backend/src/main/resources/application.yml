@@ -41,17 +41,20 @@ aipb:
       build: ${AIPB_MODEL_BUILD:claude-sonnet-5-5}
       review: ${AIPB_MODEL_REVIEW:claude-sonnet-5-5}
       present: ${AIPB_MODEL_PRESENT:claude-haiku-5-5}
+      narrate: ${AIPB_MODEL_NARRATE:claude-haiku-5-5}
     # low | medium | high | xhigh | max per stage; thinking is always on, so effort sets depth, latency and cost
     effort:
       intake: ${AIPB_EFFORT_INTAKE:medium}
       build: ${AIPB_EFFORT_BUILD:medium}
       review: ${AIPB_EFFORT_REVIEW:medium}
       present: ${AIPB_EFFORT_PRESENT:medium}
+      narrate: ${AIPB_EFFORT_NARRATE:medium}
     max-tokens:
       intake: 8000
       build: 32000
       review: 32000
       present: 8000
+      narrate: 8000
     # caps that bound every run
     max-tool-calls: 16
     max-submits: 4

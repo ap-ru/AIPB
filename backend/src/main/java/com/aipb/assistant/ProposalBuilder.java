@@ -38,6 +38,7 @@ public class ProposalBuilder {
         preview.set("rows", report.preview().rows());
         preview.put("count", report.preview().count());
         preview.put("truncated", report.preview().truncated());
+        if (report.preview().narrative() != null) preview.set("narrative", mapper.valueToTree(report.preview().narrative()));
         preview.set("sampleParams", mapper.valueToTree(report.sampleParams()));
 
         ArrayNode shows = p.putArray("whatItShows");

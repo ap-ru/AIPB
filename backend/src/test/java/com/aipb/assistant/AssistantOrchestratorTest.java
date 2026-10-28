@@ -8,6 +8,7 @@ import com.aipb.assistant.llm.LlmRequest;
 import com.aipb.assistant.stages.*;
 import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
+import com.aipb.skills.InsightSkill;
 import com.aipb.skills.SkillTemplateRegistry;
 import com.aipb.skills.WidgetSkill;
 import com.aipb.source.SourceData;
@@ -85,12 +86,14 @@ class AssistantOrchestratorTest {
 
         workflow = mock(WidgetWorkflow.class);
         TemplateGate templateGate = new TemplateGate();
-        WidgetSkill widget = new WidgetSkill(
-                new BuildStage(runner, context, tools, new BuildGate(validator, context, mapper), templateGate),
-                mock(ReviewStage.class),
-                new PresentStage(runner, context, new PresentGate(validator, mapper), templateGate, props, mapper),
-                new ProposalBuilder(mapper, widgetData), mapper);
-        templates = new SkillTemplateRegistry(List.of(widget), new WidgetPrimitives(mapper), mapper);
+        BuildStage build = new BuildStage(runner, context, tools, new BuildGate(validator, context, mapper), templateGate);
+        PresentGate presentGate = new PresentGate(validator, mapper);
+        PresentStage present = new PresentStage(runner, context, presentGate, templateGate, props, mapper);
+        ProposalBuilder proposals = new ProposalBuilder(mapper, widgetData);
+        WidgetSkill widget = new WidgetSkill(build, mock(ReviewStage.class), present, proposals, mapper);
+        InsightSkill insight = new InsightSkill(build, mock(ReviewStage.class), new NarrateStage(runner, context, present, presentGate, props, mapper),
+                proposals, mapper);
+        templates = new SkillTemplateRegistry(List.of(widget, insight), new WidgetPrimitives(mapper), mapper);
         orchestrator = new AssistantOrchestrator(sessions, new IntakeStage(runner, context, definitions, layouts, templateGate, mapper),
                 templates, library, workflow, definitions, placement, layouts, props, mapper);
     }
@@ -364,6 +367,56 @@ class AssistantOrchestratorTest {
         verify(library).create(argThat(spec -> spec.path("provenance").path("template").asText().equals("revenue-trend@v1")),
                 eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any(),
                 eq(new WidgetDefinition.SkillOrigin("widget", "revenue-trend", 1)));
+    }
+
+    static final String MOMENTUM_SUBMIT = """
+            {"collection":"revenue_monthly","params":[{"name":"clientId","type":"string"},{"name":"asOfDate","type":"date"}],
+             "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$group":{"_id":null,"revenueT12mUsd":{"$sum":"$totalUsd"}}}],
+             "columns":[{"name":"revenueT12mUsd","type":"number","unit":"USD","format":"currency","label":"Revenue (T12M)"},
+                        {"name":"revenueYoY","type":"number","unit":"ratio","format":"percent","label":"Change on prior year"}],
+             "measures":[{"column":"revenueT12mUsd","definition":"Sum of totalUsd over 12 closed months","catalogReference":"revenue_monthly.totalUsd"},
+                         {"column":"revenueYoY","definition":"Change on the prior 12 months","catalogReference":"revenue_monthly.totalUsd"}],
+             "expectedShape":"1 row","emptyIsExpected":false,"assumptions":[]}""";
+    static final String NARRATIVE = """
+            {"title":"Revenue momentum","description":"Revenue over the last 12 closed months for the selected client, against the 12 before.",
+             "statements":[
+               {"when":{"column":"","op":"","value":""},"text":"Revenue over the last 12 months is {revenueT12mUsd}.","tone":"neutral"},
+               {"when":{"column":"revenueYoY","op":">","value":"0"},"text":"That is up {revenueYoY} on the year before.","tone":"good"},
+               {"when":{"column":"revenueYoY","op":"<","value":"-0.1"},"text":"That is down {revenueYoY} on the year before.","tone":"bad"}],
+             "figures":["revenueT12mUsd","revenueYoY"],"span":5}""";
+
+    @Test
+    void anInsightTemplateBuildsTheDataThenWritesTheStatementsAndSavesAnInsight() {
+        claude.on("intake", FakeGateway.json(BRIEF))
+              .on("build", FakeGateway.tool("submit_data", MOMENTUM_SUBMIT))
+              .on("narrate", FakeGateway.json(NARRATIVE));
+        String id = orchestrator.create("default", "client", Map.of("clientId", "CL-0002"), "demo-builder", "revenue-momentum", null).getId();
+
+        orchestrator.message(id, "how is revenue trending", null, recorder);
+
+        AssistantSession s = store.get(id);
+        assertThat(s.getStatus()).isEqualTo(AssistantSession.PROPOSED);
+        assertThat(s.getKind()).isEqualTo(InsightSkill.ID);
+        assertThat(claude.stagesCalled()).containsExactly("intake", "build", "narrate");
+        // the narrate step sees the narrative primitive and the template's guidance, not the widget design catalog
+        String system = String.join("\n", claude.requests.get(2).system());
+        assertThat(system).contains("# Your role: write one insight", "the narrative primitive", "# Skill template: Revenue momentum")
+                .doesNotContain("## meter");
+        // the assembled spec: the narrative primitive, conditions read as numbers, the "always" statement has no condition
+        JsonNode view = read(s.getSpec()).path("view");
+        assertThat(view.path("primitive").asText()).isEqualTo("narrative");
+        assertThat(view.path("statements").get(0).has("when")).isFalse();
+        assertThat(view.path("statements").get(1).path("when").path("value").isNumber()).isTrue();
+        assertThat(view.path("figures")).hasSize(2);
+        assertThat(s.getRuns()).extracting(AssistantSession.StageRun::getStage).containsExactly("intake", "build", "narrate");
+        assertThat(orchestrator.stageLabels(s)).containsEntry("narrate", "Writing the insight").doesNotContainKey("present");
+
+        when(workflow.share(any(), eq(BUILDER), any(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> submission("sub-1", i.getArgument(0), WidgetSubmission.PENDING, null));
+        orchestrator.approve(id, false, null, BUILDER);
+        verify(library).create(argThat(spec -> spec.path("view").path("primitive").asText().equals("narrative")),
+                eq("assistant"), eq("demo-builder"), eq(WidgetDefinition.PERSONAL), eq("default"), eq("client"), any(),
+                eq(new WidgetDefinition.SkillOrigin(InsightSkill.ID, "revenue-momentum", 1)));
     }
 
     @Test

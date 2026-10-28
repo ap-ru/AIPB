@@ -781,3 +781,13 @@ select.active-filter { border-color: var(--brand); color: var(--brand); font-wei
 .tpl-input select, .tpl-input input { padding: 4px 8px; font-size: 12px; }
 .tpl-tag { display: inline-flex; align-items: center; gap: 5px; }
 .msg.redirect .msg-text { border-left: 3px solid var(--violet); padding-left: 12px; }
+
+/* ---------- insights: the narrative primitive ---------- */
+.spec-narrative { display: flex; flex-direction: column; gap: 10px; }
+.spec-narrative-figures { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.spec-narrative-value { font-family: var(--display); font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--thunder); line-height: 1.15; }
+.spec-narrative-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.spec-narrative-lead { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--text); font-weight: 550; }
+.spec-narrative-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.spec-narrative-lines li { display: flex; align-items: baseline; gap: 8px; }
+.spec-narrative-lines .spec-list-dot { transform: translateY(-1px); }

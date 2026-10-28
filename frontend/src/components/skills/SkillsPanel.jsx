@@ -41,7 +41,7 @@ function Preview({ title, sub, data, error }) {
         {error ? <div className="error-box">⚠ {error}</div>
           : !data ? <div className="muted" style={{ fontSize: 12 }}>Loading preview…</div>
           : data.errors?.length ? <div className="error-box">⚠ {data.errors.map((e) => e.message).join(' · ')}</div>
-          : p?.rows?.length ? <SpecView view={data.view} columns={p.columns} rows={p.rows} truncated={p.truncated} total={p.count} />
+          : p?.rows?.length ? <SpecView view={data.view} columns={p.columns} rows={p.rows} truncated={p.truncated} total={p.count} narrative={p.narrative} />
           : <div className="empty soft">No rows for these sample values.</div>}
       </div>
     </div>

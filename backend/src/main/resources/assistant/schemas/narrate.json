@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "description", "statements", "figures", "span"],
+  "properties": {
+    "title": { "type": "string", "description": "Card title, plain words, <= 40 characters." },
+    "description": { "type": "string", "description": "One or two sentences: what the insight covers, its scope and its time window." },
+    "statements": {
+      "type": "array",
+      "description": "2 to 5 statements in reading order; the first that shows is the headline.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["when", "text", "tone"],
+        "properties": {
+          "when": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["column", "op", "value"],
+            "description": "Shown only when the first row's column compares true; all \"\" for a statement that always shows.",
+            "properties": {
+              "column": { "type": "string" },
+              "op": { "type": "string", "enum": ["", ">", ">=", "<", "<=", "=", "!="] },
+              "value": { "type": "string", "description": "The value compared with, as text (a number for a number column)." }
+            }
+          },
+          "text": { "type": "string", "description": "Plain words with slots: {column}, {column:format}, {column>0?word:word}." },
+          "tone": { "type": "string", "enum": ["good", "warn", "bad", "info", "neutral"] }
+        }
+      }
+    },
+    "figures": { "type": "array", "items": { "type": "string" }, "description": "1 to 3 columns shown beside the text, the headline figure first." },
+    "span": { "type": "integer", "description": "Width out of 12." }
+  }
+}

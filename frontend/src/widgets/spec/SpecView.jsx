@@ -6,18 +6,20 @@ import Table from './primitives/Table.jsx';
 import List from './primitives/List.jsx';
 import Meter from './primitives/Meter.jsx';
 import Composition from './primitives/Composition.jsx';
+import Narrative from './primitives/Narrative.jsx';
 import { byName, formatCell, visible } from './format.js';
 import { MAX_SERIES } from './theme.js';
 
-const PRIMITIVES = { metric: Metric, bar: Bar, line: Line, table: Table, list: List, meter: Meter, composition: Composition };
+const PRIMITIVES = { metric: Metric, bar: Bar, line: Line, table: Table, list: List, meter: Meter, composition: Composition, narrative: Narrative };
 /** Primitives that draw a picture of several rows, so they offer the same rows as a table. */
 const CHARTS = new Set(['bar', 'line', 'composition']);
 
 /**
  * Renders rows with one design-system primitive, as a spec's view says. Shared by placed widgets and the workbench
- * preview, so a preview looks exactly like the widget will. Charts can switch to a table of the same rows.
+ * preview, so a preview looks exactly like the widget will. Charts can switch to a table of the same rows. An insight
+ * (the narrative primitive) shows the sentences the backend rendered from the rows ({@code narrative}).
  */
-export default function SpecView({ view, columns, rows, truncated, total }) {
+export default function SpecView({ view, columns, rows, truncated, total, narrative }) {
   const [asTable, setAsTable] = useState(false);
   const chart = CHARTS.has(view.primitive) || (view.primitive === 'meter' && Boolean(view.x));
   const P = asTable ? Table : PRIMITIVES[view.primitive];
@@ -37,7 +39,7 @@ export default function SpecView({ view, columns, rows, truncated, total }) {
           )}
         </div>
       )}
-      <P view={drawn.view} cols={drawn.cols} rows={drawn.rows} />
+      <P view={drawn.view} cols={drawn.cols} rows={drawn.rows} narrative={narrative} />
     </div>
   );
 }

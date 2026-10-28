@@ -73,6 +73,11 @@ public class PresentStage {
     }
 
     String userContext(JsonNode brief, JsonNode artifact, String changeRequest, AssistantTools.Context ctx) {
+        return dataContext(brief, artifact, changeRequest, ctx) + "\nDesign the display for this data.";
+    }
+
+    /** The page, the brief, the data's columns and sample rows, and any change request - what a design step works from. */
+    String dataContext(JsonNode brief, JsonNode artifact, String changeRequest, AssistantTools.Context ctx) {
         StringBuilder sb = new StringBuilder();
         sb.append(context.page(ctx.layoutId(), ctx.pageId(), ctx.sampleParams()));
         ObjectNode b = mapper.createObjectNode();
@@ -94,7 +99,6 @@ public class PresentStage {
         if (artifact.path("warnings").size() > 0) sb.append("warnings: ").append(artifact.path("warnings")).append('\n');
         sb.append("</data>\n");
         if (changeRequest != null) sb.append("<change_request>\n").append(changeRequest).append("\n</change_request>\n");
-        sb.append("\nDesign the display for this data.");
         return sb.toString();
     }
 }

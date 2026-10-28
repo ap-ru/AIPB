@@ -31,7 +31,9 @@ public class WidgetSpecValidator {
     private static final Set<String> WRITE_STAGES = Set.of("$out", "$merge");
     private static final Set<String> SERVER_JS = Set.of("$function", "$where", "$accumulator");
     private static final Set<String> VIEW_KEYS = Set.of("value", "compare", "secondary", "x", "y", "orientation", "stacked",
-            "columns", "title", "subtitle", "badge", "meta", "reference", "emphasis", "polarity", "headline", "warnAt", "series");
+            "columns", "title", "subtitle", "badge", "meta", "reference", "emphasis", "polarity", "headline", "warnAt", "series",
+            "statements", "figures");
+    static final String NARRATIVE = "narrative";
     private static final Set<String> ADDITIVE_UNITS = Set.of("USD", "count");
     private static final String EMPTY_HINT = "Common causes: comparing a date field to a plain string (use a date param or "
             + "{\"$date\": ...}), a filter value that does not exist (check allowedValues in _catalog), or a field name typo.";
@@ -182,6 +184,7 @@ public class WidgetSpecValidator {
         Set<String> allowed = new LinkedHashSet<>();
         roles.fieldNames().forEachRemaining(allowed::add);
         options.fieldNames().forEachRemaining(allowed::add);
+        if (NARRATIVE.equals(v.primitive())) allowed.add("statements");
 
         viewJson.fieldNames().forEachRemaining(k -> {
             if (!k.equals("primitive") && VIEW_KEYS.contains(k) && !allowed.contains(k))
@@ -223,6 +226,8 @@ public class WidgetSpecValidator {
         }
         if (v.series() != null && v.y() != null && v.y().size() != 1)
             is.error("view_role", "view.series", "with series, give exactly one y column (its values are split by " + v.series() + ")");
+        if (NARRATIVE.equals(v.primitive()))
+            NarrativeRenderer.problems(v, cols, formats()).forEach(p -> is.error("narrative", p.path(), p.message()));
         checkIntents(spec, cols, is);
     }
 
@@ -340,10 +345,24 @@ public class WidgetSpecValidator {
                         + " values - filter, or use a table");
             checkRows(spec, r.columns(), rows, is);
         }
+        NarrativeRenderer.Narrative narrative = null;
+        if (NARRATIVE.equals(spec.view().primitive()) && r.count() > 0) {
+            narrative = NarrativeRenderer.render(spec.view(), r.columns(), rows);
+            if (narrative.lines().isEmpty())
+                is.error("narrative", "view.statements", "no statement shows" + where + ": give the headline no condition, and check the slots have values");
+            else if (narrative.skipped() > 0)
+                is.warn("narrative", "view.statements", narrative.skipped() + " statement(s) were left out" + where + " because a slot had no value");
+        }
         r.notes().forEach(n -> is.warn("note", dataPath, n));
         ValidationReport.Preview preview = new ValidationReport.Preview(r.columns(),
-                WidgetDataService.project(rows, r.columns(), PREVIEW_ROWS), r.count(), r.total(), r.truncated(), r.asOfDate(), r.notes());
+                WidgetDataService.project(rows, r.columns(), PREVIEW_ROWS), r.count(), r.total(), r.truncated(), r.asOfDate(), r.notes(), narrative);
         return is.report(sample, preview);
+    }
+
+    private Set<String> formats() {
+        Set<String> out = new LinkedHashSet<>();
+        primitives.catalog().path("formats").fieldNames().forEachRemaining(out::add);
+        return out;
     }
 
     private static int distinct(JsonNode rows, String column) {

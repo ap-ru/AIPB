@@ -147,6 +147,8 @@ public class WidgetController {
         m.put("description", spec.description());
         m.put("columns", r.columns());
         m.put("rows", r.rows());
+        if (WidgetSpecValidator.NARRATIVE.equals(spec.view().primitive()))
+            m.put("narrative", NarrativeRenderer.render(spec.view(), r.columns(), r.rows()));
         m.put("count", r.count());
         m.put("total", r.total());
         m.put("truncated", r.truncated());

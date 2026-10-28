@@ -437,6 +437,27 @@
       },
       "defaultSpan": 6,
       "guidance": "Use for signals, contacts, activities. Sort and $limit in the pipeline."
+    },
+    "narrative": {
+      "skill": "insight",
+      "description": "An insight: a few plain sentences about the figures in the first row, each shown when its condition holds, with key figures beside them. Rendered by code from the statements - no model call when it is viewed.",
+      "roles": {
+        "figures": {
+          "many": true,
+          "types": [
+            "number",
+            "string",
+            "date"
+          ],
+          "description": "Columns shown as figures beside the text."
+        }
+      },
+      "rows": {
+        "min": 1,
+        "max": 1
+      },
+      "defaultSpan": 6,
+      "guidance": "Return one row that already holds every figure the sentences need (totals, changes, shares). Write 2 to 5 statements: a headline that always shows, then conditional ones that read the figures (above or below a threshold) with a tone. Slots format themselves; never write a number into the text."
     }
   },
   "columnFeatures": {

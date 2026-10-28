@@ -124,7 +124,7 @@ function Proposal({ proposal, reviewState, placed, submitted, session, reviewer,
         <div className="card-body spec-body">
           {proposal.description && <div className="spec-sub"><span>{proposal.description}</span></div>}
           {p.rows && p.rows.length
-            ? <SpecView view={p.view} columns={p.columns} rows={p.rows} truncated={p.truncated} total={p.count} />
+            ? <SpecView view={p.view} columns={p.columns} rows={p.rows} truncated={p.truncated} total={p.count} narrative={p.narrative} />
             : <div className="empty soft">No rows for the selected {page.params?.length ? page.params[0].label.toLowerCase() : 'selection'}.</div>}
         </div>
       </div>

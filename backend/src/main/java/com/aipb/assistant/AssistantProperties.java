@@ -17,10 +17,11 @@ public class AssistantProperties {
     public static final String DEFAULT_MODEL = "claude-sonnet-5-5";
 
     /** Model per stage: the light stages (intake, present) on Haiku, the reasoning-heavy ones (build, review) on Sonnet. */
-    private Map<String, String> model = new LinkedHashMap<>(Map.of("intake", "claude-haiku-5-5", "build", "claude-sonnet-5-5", "review", "claude-sonnet-5-5", "present", "claude-haiku-5-5"));
+    private Map<String, String> model = new LinkedHashMap<>(Map.of("intake", "claude-haiku-5-5", "build", "claude-sonnet-5-5", "review", "claude-sonnet-5-5", "present", "claude-haiku-5-5",
+            "narrate", "claude-haiku-5-5"));
     /** Effort per stage (low | medium | high | xhigh | max). */
-    private Map<String, String> effort = new LinkedHashMap<>(Map.of("intake", "medium", "build", "medium", "review", "medium", "present", "medium"));
-    private Map<String, Long> maxTokens = new LinkedHashMap<>(Map.of("intake", 8000L, "build", 32000L, "review", 32000L, "present", 8000L));
+    private Map<String, String> effort = new LinkedHashMap<>(Map.of("intake", "medium", "build", "medium", "review", "medium", "present", "medium", "narrate", "medium"));
+    private Map<String, Long> maxTokens = new LinkedHashMap<>(Map.of("intake", 8000L, "build", 32000L, "review", 32000L, "present", 8000L, "narrate", 8000L));
     private int maxToolCalls = 16;
     private int maxSubmits = 4;
     private int maxPresentAttempts = 3;

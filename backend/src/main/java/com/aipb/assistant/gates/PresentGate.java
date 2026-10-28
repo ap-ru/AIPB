@@ -32,7 +32,44 @@ public class PresentGate {
 
     public Result check(JsonNode design, JsonNode artifact, AssistantTools.Context ctx) {
         List<String> errors = new ArrayList<>();
+        return validated(assemble(design, artifact, errors), errors, ctx);
+    }
+
+    /**
+     * An insight: the spec assembled from the data and the narrate design (statements and figures for the narrative
+     * primitive), checked by the same validator - which also renders the statements on the sample.
+     */
+    public Result checkNarrative(JsonNode design, JsonNode artifact, AssistantTools.Context ctx) {
+        List<String> errors = new ArrayList<>();
         ObjectNode spec = assemble(design, artifact, errors);
+        ObjectNode view = spec.putObject("view");
+        view.put("primitive", "narrative");
+        ArrayNode statements = view.putArray("statements");
+        design.path("statements").forEach(st -> {
+            ObjectNode o = statements.addObject();
+            JsonNode when = st.path("when");
+            if (!when.path("column").asText("").isBlank()) {
+                ObjectNode w = o.putObject("when");
+                w.put("column", when.path("column").asText());
+                w.put("op", when.path("op").asText());
+                w.set("value", conditionValue(when.path("value").asText("")));
+            }
+            o.put("text", st.path("text").asText());
+            o.put("tone", st.path("tone").asText("neutral"));
+        });
+        view.set("figures", design.path("figures").isArray() ? design.get("figures") : mapper.createArrayNode());
+        return validated(spec, errors, ctx);
+    }
+
+    /** A condition's value, written as text in the design: a number when it reads as one, true/false, otherwise the text. */
+    private JsonNode conditionValue(String v) {
+        String t = v.trim();
+        if (t.matches("-?[0-9]+(\\.[0-9]+)?")) return mapper.getNodeFactory().numberNode(Double.parseDouble(t));
+        if (t.equals("true") || t.equals("false")) return mapper.getNodeFactory().booleanNode(Boolean.parseBoolean(t));
+        return mapper.getNodeFactory().textNode(t);
+    }
+
+    private Result validated(ObjectNode spec, List<String> errors, AssistantTools.Context ctx) {
         if (!errors.isEmpty()) return new Result(false, errors, null, null);
         ValidationReport report = validator.validate(spec, ctx.layoutId(), ctx.pageId(), ctx.sampleParams());
         report.errors().forEach(e -> errors.add(e.code() + " (" + e.path() + "): " + e.message()));

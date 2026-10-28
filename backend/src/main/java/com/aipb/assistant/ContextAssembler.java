@@ -62,7 +62,7 @@ public class ContextAssembler {
         this.widgetData = widgetData;
         this.layouts = layouts;
         this.mapper = mapper;
-        for (String p : List.of("primer", "intake", "build", "review", "present")) prompts.put(p, resource("assistant/prompts/" + p + ".md"));
+        for (String p : List.of("primer", "intake", "build", "review", "present", "narrate")) prompts.put(p, resource("assistant/prompts/" + p + ".md"));
     }
 
     // ------------------------------------------------------------------ static context, per stage
@@ -108,6 +108,12 @@ public class ContextAssembler {
         return withTemplate("present", template, primer(), stage("present"),
                 new Block("design-catalog", "widgets/primitives.json", designCatalog()),
                 new Block("present-examples", "assistant/examples " + examples, presentExamples(examples)));
+    }
+
+    /** An insight's design step: the narrative primitive, the formats its slots can ask for, and the template's guidance. */
+    public List<Block> narrateSystem(SkillTemplate template) {
+        return withTemplate("narrate", template, primer(), stage("narrate"),
+                new Block("narrative-catalog", "widgets/primitives.json", narrativeCatalog()));
     }
 
     private static List<String> examples(SkillTemplate t, String stage, List<String> defaults) {
@@ -235,8 +241,10 @@ public class ContextAssembler {
 
     private String primitiveMenu() {
         StringBuilder sb = new StringBuilder("# Display primitives\n\nWidgets are drawn with one of these:\n");
-        primitives.catalog().path("primitives").fields().forEachRemaining(e ->
-                sb.append("- ").append(e.getKey()).append(": ").append(e.getValue().path("description").asText()).append('\n'));
+        primitives.catalog().path("primitives").fields().forEachRemaining(e -> {
+            if (forWidgets(e.getValue()))
+                sb.append("- ").append(e.getKey()).append(": ").append(e.getValue().path("description").asText()).append('\n');
+        });
         return sb.toString();
     }
 
@@ -249,6 +257,7 @@ public class ContextAssembler {
         }
         cat.path("primitives").fields().forEachRemaining(e -> {
             JsonNode p = e.getValue();
+            if (!forWidgets(p)) return;
             sb.append("\n## ").append(e.getKey()).append('\n').append(p.path("description").asText()).append('\n').append("Roles:\n");
             p.path("roles").fields().forEachRemaining(r -> {
                 if (NOT_FOR_ASSISTANT.contains(r.getKey())) return;
@@ -271,6 +280,23 @@ public class ContextAssembler {
                     .append("Guidance: ").append(p.path("guidance").asText()).append('\n');
         });
         sb.append("\n## Badge tones\ngood (green), warn (amber), bad (red), info (blue), neutral (grey). Badges always show their text.\n");
+        return sb.toString();
+    }
+
+    /** Primitives of another skill kind (the insight's narrative) are left out of the widget stages' catalogs. */
+    private static boolean forWidgets(JsonNode primitive) { return !primitive.has("skill"); }
+
+    private String narrativeCatalog() {
+        JsonNode cat = primitives.catalog();
+        JsonNode p = cat.path("primitives").path("narrative");
+        StringBuilder sb = new StringBuilder("# Design system: the narrative primitive\n\n").append(p.path("description").asText()).append('\n')
+                .append("Rows: ").append(p.path("rows").path("min").asInt()).append(" to ").append(p.path("rows").path("max").asInt())
+                .append(". Default span: ").append(p.path("defaultSpan").asInt()).append('\n')
+                .append("Guidance: ").append(p.path("guidance").asText()).append('\n')
+                .append("\n## Formats a slot can ask for ({column:format})\n");
+        cat.path("formats").fields().forEachRemaining(f -> sb.append("- ").append(f.getKey()).append(" (").append(String.join("/", strings(f.getValue().path("types"))))
+                .append("): ").append(f.getValue().path("description").asText()).append('\n'));
+        sb.append("\n## Tones\ngood (green), warn (amber), bad (red), info (blue), neutral (grey).\n");
         return sb.toString();
     }
 

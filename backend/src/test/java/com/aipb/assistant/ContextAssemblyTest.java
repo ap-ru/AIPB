@@ -6,6 +6,7 @@ import com.aipb.seed.Defaults;
 import com.aipb.service.LayoutService;
 import com.aipb.skills.SkillTemplate;
 import com.aipb.skills.SkillTemplateRegistry;
+import com.aipb.skills.InsightSkill;
 import com.aipb.skills.WidgetSkill;
 import com.aipb.source.SourceData;
 import com.aipb.widget.*;
@@ -65,6 +66,38 @@ class ContextAssemblyTest {
         tools = new AssistantTools(source, mapper);
     }
 
+    /**
+     * The Custom widget system blocks of every stage, pinned by hash (src/test/resources/assistant/system-blocks.sha256):
+     * they must stay byte-identical to the eval baseline's (docs/eval-baseline.md) and to the cached prefix. A deliberate
+     * change regenerates the file with -Daipb.pin.update=true - and invalidates the baseline.
+     */
+    @Test
+    void customWidgetSystemBlocksStayPinned() throws Exception {
+        Map<String, List<ContextAssembler.Block>> stages = new LinkedHashMap<>();
+        stages.put("intake", context.intakeSystem());
+        stages.put("build", context.buildSystem());
+        stages.put("review", context.reviewSystem());
+        stages.put("present", context.presentSystem());
+        StringBuilder sb = new StringBuilder();
+        stages.forEach((stage, blocks) -> blocks.forEach(b -> sb.append(stage).append(' ').append(b.name()).append(' ')
+                .append(sha256(b.text())).append('\n')));
+        Path pin = Path.of("src/test/resources/assistant/system-blocks.sha256");
+        if (Boolean.getBoolean("aipb.pin.update") || !Files.exists(pin)) {
+            Files.createDirectories(pin.getParent());
+            Files.writeString(pin, sb.toString());
+        }
+        assertThat(sb.toString()).isEqualTo(Files.readString(pin));
+    }
+
+    private static String sha256(String text) {
+        try {
+            byte[] d = java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(d);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     @Test
     void staticContextIsDeterministicSoItCaches() {
         assertThat(ContextAssembler.texts(context.buildSystem())).isEqualTo(ContextAssembler.texts(context.buildSystem()));
@@ -114,7 +147,10 @@ class ContextAssemblyTest {
         WidgetSkill widget = mock(WidgetSkill.class);
         when(widget.id()).thenReturn("widget");
         when(widget.stageLabels()).thenReturn(Map.of("build", "", "review", "", "present", ""));
-        return new SkillTemplateRegistry(List.of(widget), new WidgetPrimitives(mapper), mapper);
+        InsightSkill insight = mock(InsightSkill.class);
+        when(insight.id()).thenReturn("insight");
+        when(insight.stageLabels()).thenReturn(Map.of("build", "", "review", "", "narrate", ""));
+        return new SkillTemplateRegistry(List.of(widget, insight), new WidgetPrimitives(mapper), mapper);
     }
 
     @Test

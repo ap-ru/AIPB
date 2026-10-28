@@ -142,7 +142,7 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
                 <div className="card-body">
                   {report.preview.rows.length
                     ? <SpecView view={parsed.view} columns={report.preview.columns} rows={report.preview.rows}
-                        truncated={report.preview.truncated} total={report.preview.total} />
+                        truncated={report.preview.truncated} total={report.preview.total} narrative={report.preview.narrative} />
                     : <div className="empty">No rows</div>}
                 </div>
               </div>
