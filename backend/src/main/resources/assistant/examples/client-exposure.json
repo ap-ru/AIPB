@@ -7,79 +7,36 @@
     {
       "name": "clientId",
       "type": "string",
-      "description": "Client key (clients.clientId), e.g. CL-0001"
+      "description": "Client key (Client.clientId), e.g. CL-0001"
     }
   ],
   "data": {
-    "collection": "holdings",
-    "pipeline": [
-      {
-        "$match": {
-          "clientId": {
-            "$param": "clientId"
-          },
-          "productType": "credit"
+    "custom": {
+      "cypher": "MATCH (:Client {clientId: $clientId})-[:HOLDS]->(h:Holding)\nWHERE h.productType = 'credit'\nWITH sum(h.drawnUsd) AS exposureUsd, sum(h.committedUsd) AS committedUsd\nRETURN exposureUsd, committedUsd, CASE WHEN committedUsd > 0 THEN toFloat(exposureUsd) / committedUsd ELSE 0.0 END AS utilization",
+      "columns": [
+        {
+          "name": "exposureUsd",
+          "type": "number",
+          "unit": "USD",
+          "format": "currency",
+          "label": "Exposure"
+        },
+        {
+          "name": "committedUsd",
+          "type": "number",
+          "unit": "USD",
+          "format": "currency",
+          "label": "Committed"
+        },
+        {
+          "name": "utilization",
+          "type": "number",
+          "unit": "ratio",
+          "format": "percent",
+          "label": "Utilization"
         }
-      },
-      {
-        "$group": {
-          "_id": null,
-          "exposureUsd": {
-            "$sum": "$drawnUsd"
-          },
-          "committedUsd": {
-            "$sum": "$committedUsd"
-          }
-        }
-      },
-      {
-        "$project": {
-          "_id": 0,
-          "exposureUsd": 1,
-          "committedUsd": 1,
-          "utilization": {
-            "$cond": [
-              {
-                "$gt": [
-                  "$committedUsd",
-                  0
-                ]
-              },
-              {
-                "$divide": [
-                  "$exposureUsd",
-                  "$committedUsd"
-                ]
-              },
-              0
-            ]
-          }
-        }
-      }
-    ],
-    "columns": [
-      {
-        "name": "exposureUsd",
-        "type": "number",
-        "unit": "USD",
-        "format": "currency",
-        "label": "Exposure"
-      },
-      {
-        "name": "committedUsd",
-        "type": "number",
-        "unit": "USD",
-        "format": "currency",
-        "label": "Committed"
-      },
-      {
-        "name": "utilization",
-        "type": "number",
-        "unit": "ratio",
-        "format": "percent",
-        "label": "Utilization"
-      }
-    ]
+      ]
+    }
   },
   "view": {
     "primitive": "meter",

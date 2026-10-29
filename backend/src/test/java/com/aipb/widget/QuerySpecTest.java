@@ -6,7 +6,7 @@ import com.aipb.semantic.ResultSet;
 import com.aipb.semantic.SemanticModel;
 import com.aipb.semantic.SemanticModelValidator;
 import com.aipb.service.LayoutService;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
 import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,15 +29,15 @@ class QuerySpecTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final SemanticModel sm = SemanticModel.fromClasspath(mapper);
-    private SourceData source;
+    private GraphMcpSource source;
     private WidgetSpecValidator validator;
     private WidgetDataService data;
     private final WidgetPrimitives primitives = new WidgetPrimitives(mapper);
 
     @BeforeEach
     void setUp() {
-        source = mock(SourceData.class);
-        when(source.collectionsCached()).thenReturn(List.of("_catalog", "holdings", "revenue_monthly"));
+        source = mock(GraphMcpSource.class);
+        when(source.labelsCached()).thenReturn(List.of("Holding", "RevenueMonth"));
         when(source.asOfDate()).thenReturn("2026-10-16T00:00:00.000Z");
         LayoutService layouts = mock(LayoutService.class);
         Layout layout = new Layout();
@@ -60,7 +60,7 @@ class QuerySpecTest {
 
     private void returns(String rows) throws Exception {
         JsonNode r = mapper.readTree(rows);
-        when(source.aggregate(anyString(), any(ArrayNode.class))).thenReturn(new SourceReader.Result(r, r.size(), r.size(), List.of()));
+        when(source.cypher(anyString(), any())).thenReturn(new SourceReader.Result(r, r.size(), r.size(), List.of()));
     }
 
     private static final String EXPOSURE = """
@@ -74,7 +74,7 @@ class QuerySpecTest {
 
     // ------------------------------------------------------------------ migration
     @Test
-    void formatOneIsReadAsCustomDataLosslessly() throws Exception {
+    void formatOneIsReadAsCustomDataThatNeedsARebuild() throws Exception {
         ObjectNode v1 = json("""
                 {"id": "xyz-spec", "title": "t", "description": "d", "params": [{"name": "clientId", "type": "string"}],
                  "data": {"collection": "holdings", "pipeline": [{"$match": {"clientId": {"$param": "clientId"}}}],
@@ -89,6 +89,11 @@ class QuerySpecTest {
         assertThat(v1.path("data").has("collection")).as("input untouched").isTrue();
         assertThat(SpecMigrator.migrate(v2)).as("idempotent").isEqualTo(v2);
         assertThat(primitives.schemaErrors(v2)).isEmpty();
+        // a MongoDB pipeline cannot run on the graph: the validator says to rebuild it, and nothing runs it
+        ValidationReport r = validator.validate(v1, "default", "client", Map.of("clientId", "CL-0001"));
+        assertThat(codes(r.errors())).containsExactly("needs_rebuild");
+        assertThat(SpecMigrator.read(mapper, v1).custom().needsRebuild()).isTrue();
+        verify(source, never()).cypher(anyString(), any());
     }
 
     // ------------------------------------------------------------------ validation of query specs
@@ -101,7 +106,7 @@ class QuerySpecTest {
         ResultSet.Column drawn = r.preview().columns().stream().filter(c -> c.name().equals("exposureUsd")).findFirst().orElseThrow();
         assertThat(drawn.label()).isEqualTo("Drawn");
         assertThat(drawn.format()).isEqualTo("currency");
-        assertThat(drawn.lineage().sources()).containsExactly("holdings.drawnUsd");
+        assertThat(drawn.lineage().sources()).containsExactly("Holding.drawnUsd");
         assertThat(r.preview().rows().get(0).get("utilization").asDouble()).isEqualTo(0.8);
     }
 

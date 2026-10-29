@@ -2,7 +2,7 @@ package com.aipb.semantic;
 
 import org.junit.jupiter.api.Test;
 
-import static com.aipb.semantic.PipelineCompilerTest.*;
+import static com.aipb.semantic.CypherCompilerTest.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -94,12 +94,12 @@ class QueryPlannerTest {
     void lineageCarriesTheDefinitionSourcesAndResolvedWindow() {
         QueryPlanner.Plan plan = planner.plan(q("{\"metrics\": [\"revenueUsd\", \"utilization\"], \"window\": {\"type\": \"ytd\"}}"), CLIENT);
         ResultSet.Lineage rev = plan.outputs().get(0).column().lineage();
-        assertThat(rev.sources()).containsExactly("revenue_monthly.totalUsd");
+        assertThat(rev.sources()).containsExactly("RevenueMonth.totalUsd");
         assertThat(rev.window()).isEqualTo("calendar year to date (Jan 1, 2026 - Sep 30, 2026)");
         ResultSet.Lineage util = plan.outputs().get(1).column().lineage();
         assertThat(util.kind()).isEqualTo("metric");
         assertThat(util.definition()).contains("exposureUsd / committedUsd");
-        assertThat(util.sources()).containsExactly("holdings.drawnUsd", "holdings.committedUsd");
+        assertThat(util.sources()).containsExactly("Holding.drawnUsd", "Holding.committedUsd");
         assertThat(util.window()).isEqualTo("current, as of 2026-10-16");
     }
 

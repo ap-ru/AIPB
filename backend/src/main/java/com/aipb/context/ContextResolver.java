@@ -117,7 +117,7 @@ public class ContextResolver {
 
     /**
      * The choices for a filter slot: the dimension's values when the semantic layer enumerates them, otherwise the
-     * distinct values of the entity model's field (e.g. relationship managers), sorted.
+     * distinct values of the entity model's property (e.g. relationship managers), sorted.
      */
     public List<String> filterOptions(String dimension) {
         Dimension d = semantic.dimension(dimension);
@@ -127,12 +127,11 @@ public class ContextResolver {
         Model.Binding b = entity == null ? null : entity.dimensions().get(dimension);
         if (b == null || b.field().contains("."))
             throw new IllegalArgumentException("dimension '" + dimension + "' has no list of values to choose from");
-        ArrayNode pipeline = F.arrayNode();
-        pipeline.addObject().putObject("$group").put("_id", "$" + b.field());
-        pipeline.addObject().putObject("$sort").put("_id", 1);
+        String cypher = "MATCH (n:" + SourceReader.label(entity.node()) + ") WHERE n." + SourceReader.property(b.field())
+                + " IS NOT NULL RETURN DISTINCT n." + b.field() + " AS value ORDER BY value";
         List<String> out = new ArrayList<>();
-        for (JsonNode n : source.aggregate(entity.collection(), pipeline).documents())
-            if (n.hasNonNull("_id") && !n.get("_id").asText().isBlank()) out.add(n.get("_id").asText());
+        for (JsonNode n : source.cypher(cypher, Map.of()).documents())
+            if (n.hasNonNull("value") && !n.get("value").asText().isBlank()) out.add(n.get("value").asText());
         return out;
     }
 

@@ -33,9 +33,9 @@ public class BuildGate {
 
     public Result check(JsonNode in, AssistantTools.Context ctx, String title, String description) {
         List<String> errors = new ArrayList<>();
-        for (String key : List.of("params", "pipeline", "columns", "measures", "assumptions"))
+        for (String key : List.of("params", "columns", "measures", "assumptions"))
             if (!in.path(key).isArray()) errors.add(key + " must be an array");
-        if (!in.path("collection").isTextual()) errors.add("collection is required");
+        if (!in.path("cypher").isTextual() || in.path("cypher").asText().isBlank()) errors.add("cypher is required (the read-only query)");
         if (!in.path("expectedShape").isTextual()) errors.add("expectedShape is required");
         if (!errors.isEmpty()) return new Result(false, errors, null);
 
@@ -63,11 +63,11 @@ public class BuildGate {
         spec.put("id", "assistant-draft");
         spec.put("title", truncate(title == null || title.isBlank() ? "Draft widget" : title, 80));
         spec.put("description", truncate(description == null || description.isBlank() ? "Draft widget" : description, 400));
+        spec.put("specVersion", 2);
         spec.set("params", in.get("params"));
-        ObjectNode data = spec.putObject("data");
-        data.set("collection", in.get("collection"));
-        data.set("pipeline", in.get("pipeline"));
-        data.set("columns", in.get("columns"));
+        ObjectNode custom = spec.putObject("data").putObject("custom");
+        custom.set("cypher", in.get("cypher"));
+        custom.set("columns", in.get("columns"));
         ObjectNode view = spec.putObject("view");
         view.put("primitive", "table");
         ArrayNode cols = view.putArray("columns");
@@ -86,13 +86,13 @@ public class BuildGate {
             if (m.path("definition").asText("").isBlank()) errors.add("measure '" + col + "' needs a definition");
             String ref = m.path("catalogReference").asText("");
             int dot = ref.indexOf('.');
-            String coll = dot > 0 ? ref.substring(0, dot) : ref;
+            String label = dot > 0 ? ref.substring(0, dot) : ref;
             String name = dot > 0 ? ref.substring(dot + 1) : "";
-            if (!refs.containsKey(coll)) {
-                errors.add("measure '" + col + "': catalogReference '" + ref + "' does not name a collection; use collection.field, e.g. holdings.drawnUsd");
-            } else if (!refs.get(coll).contains(name)) {
-                errors.add("measure '" + col + "': catalogReference '" + ref + "' is not a field or derived metric of " + coll
-                        + "; valid names: " + String.join(", ", refs.get(coll)));
+            if (!refs.containsKey(label)) {
+                errors.add("measure '" + col + "': catalogReference '" + ref + "' does not name a label; use Label.property, e.g. Holding.drawnUsd");
+            } else if (!refs.get(label).contains(name)) {
+                errors.add("measure '" + col + "': catalogReference '" + ref + "' is not a property or derived metric of " + label
+                        + "; valid names: " + String.join(", ", refs.get(label)));
             }
             measures.put(col, m);
         }

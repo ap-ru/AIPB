@@ -3,7 +3,7 @@
   "label": "Clients",
   "version": 1,
   "description": "One row per client relationship. The entity model: every model whose rows belong to a client inherits these dimensions (region, industry, tier, ...) through clientId.",
-  "collection": "clients",
+  "node": "Client",
   "entity": "clientId",
   "entityModel": true,
   "time": null,

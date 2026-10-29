@@ -11,7 +11,7 @@ import java.util.Map;
  * The answer to a semantic query: columns whose type, unit, format and meaning are derived from the semantic model
  * (never declared by hand), the rows, and how they were produced. {@code truncated}: a source limit cut a query short,
  * so the figures are incomplete. {@code hasMore}: a records query had more rows than its limit (expected, not an error).
- * {@code queries} are the pipelines that ran - the audit trail behind every number.
+ * {@code queries} are the Cypher queries that ran - the audit trail behind every number.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ResultSet(List<Column> columns, ArrayNode rows, int count, boolean truncated, boolean hasMore, String asOfDate,
@@ -49,8 +49,8 @@ public record ResultSet(List<Column> columns, ArrayNode rows, int count, boolean
     public record Lineage(String kind, String id, Integer version, List<String> models, String definition, List<String> sources,
                           String window) {}
 
-    /** One pipeline that ran: why, against which model and collection, and what came back. */
-    public record Executed(String purpose, String model, String collection, JsonNode pipeline, int rows, boolean truncated) {}
+    /** One query that ran: why, against which model and label, the query ({cypher, params}), and what came back. */
+    public record Executed(String purpose, String model, String label, JsonNode query, int rows, boolean truncated) {}
 
     public Column column(String name) { return columns.stream().filter(c -> c.name().equals(name)).findFirst().orElse(null); }
 

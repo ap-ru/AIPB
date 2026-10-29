@@ -1,14 +1,18 @@
 package com.aipb.semantic;
 
+import com.aipb.source.ReadOnlyCypher;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Checks the semantic model. {@link #structural} needs nothing but the model (ids unique, references resolve, no
- * metric cycles, valid aggregations, units, windows) and runs on every load. {@link #againstCatalog} checks it against
- * the data dictionary (_catalog): every field it reads exists, joins land on primary keys, and every value it filters
- * on or enumerates is an allowed value - so a renamed field or value in the source is caught, not silently empty.
+ * metric cycles, valid aggregations, units, windows, expressions that read only what they declare) and runs on every
+ * load. {@link #againstCatalog} checks it against the data dictionary ((:_Catalog)): every label and property it reads
+ * exists, every join is a relationship the dictionary declares as many-to-one, and every value it filters on or
+ * enumerates is an allowed value - so a renamed property or value in the source is caught, not silently empty.
  */
 public final class SemanticModelValidator {
 
@@ -20,6 +24,9 @@ public final class SemanticModelValidator {
     static final Set<String> POLARITIES = Set.of("higherIsBetter", "lowerIsBetter", "neutral");
     static final Set<String> KINDS = Set.of("ratio", "difference", "change", "same");
     static final Set<String> TONES = Set.of("good", "warn", "bad", "info", "neutral");
+    /** A property reference inside an expression: {@code variable.property}. */
+    private static final Pattern PROPERTY_REF = Pattern.compile("(?<![\\w.$])([A-Za-z_]\\w*)\\s*\\.\\s*([A-Za-z_]\\w*)");
+    private static final Pattern IDENT = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     private SemanticModelValidator() {}
 
@@ -50,12 +57,16 @@ public final class SemanticModelValidator {
 
     private static void checkModel(SemanticModel sm, Model m, Set<String> metricIds, List<String> out) {
         String at = "model " + m.id();
-        if (m.collection() == null || m.collection().isBlank()) out.add(at + ": collection is required");
+        if (m.node() == null || !IDENT.matcher(m.node()).matches()) out.add(at + ": node (the label it reads) is required");
         if (m.time() != null && !GRAINS.contains(m.time().grain())) out.add(at + ": time grain must be month, quarter or year");
+        if (m.entity() != null && !m.entityModel() && m.entityJoin() == null)
+            out.add(at + ": a client-owned model needs entityJoin (the relationship to the entity model's node)");
         m.joins().forEach((name, j) -> {
             if (sm.dimension(name) != null && !sm.dimension(name).id().equals(name)) out.add(at + ": join '" + name + "' clashes with a dimension");
-            if (j.collection().isBlank() || j.localField().isBlank() || j.foreignField().isBlank())
-                out.add(at + ": join '" + name + "' needs collection, localField and foreignField");
+            if (!IDENT.matcher(name).matches() || name.equals("n")) out.add(at + ": join name '" + name + "' must be a plain identifier other than n");
+            if (j.rel() == null || !IDENT.matcher(j.rel()).matches() || j.node() == null || !IDENT.matcher(j.node()).matches()
+                    || !Set.of("in", "out").contains(j.dir()))
+                out.add(at + ": join '" + name + "' needs rel, dir (in or out) and node");
         });
         m.dimensions().forEach((dim, b) -> {
             Dimension d = sm.dimension(dim);
@@ -80,6 +91,7 @@ public final class SemanticModelValidator {
             if (!ms.agg().equals("count") && !valued) out.add(mat + ": " + ms.agg() + " needs a field or an expr");
             if (ms.field() != null && ms.expr() != null) out.add(mat + ": give a field or an expr, not both");
             if (ms.expr() != null && ms.sources().isEmpty()) out.add(mat + ": an expr needs sources (the catalog fields it reads)");
+            if (ms.expr() != null) checkExpr(m, ms.expr(), ms.sources(), mat, out);
             if (!UNITS.contains(ms.unit())) out.add(mat + ": unit '" + ms.unit() + "' is not one of " + UNITS);
             if (!POLARITIES.contains(ms.polarity())) out.add(mat + ": polarity must be one of " + POLARITIES);
             if (ms.description().isBlank()) out.add(mat + ": needs a description (it is shown to bankers as the figure's definition)");
@@ -93,6 +105,7 @@ public final class SemanticModelValidator {
                 if (!ids.add(f.id())) out.add(fat + ": defined twice");
                 if (!TYPES.contains(f.type())) out.add(fat + ": type must be one of " + TYPES);
                 if ((f.field() == null) == (f.expr() == null)) out.add(fat + ": give exactly one of field or expr");
+                if (f.expr() != null) checkExpr(m, f.expr(), f.sources(), fat, out);
                 if (f.unit() != null && !UNITS.contains(f.unit())) out.add(fat + ": unit '" + f.unit() + "' is not one of " + UNITS);
                 if (f.dimension() != null && sm.dimension(f.dimension()) == null) out.add(fat + ": unknown dimension '" + f.dimension() + "'");
                 if (f.field() != null) checkPath(m, f.field(), fat, out);
@@ -104,6 +117,26 @@ public final class SemanticModelValidator {
             }
             m.records().defaultSort().forEach(s -> { if (!ids.contains(s.by())) out.add(at + ": records defaultSort by unknown field '" + s.by() + "'"); });
             if (m.records().fields().isEmpty()) out.add(at + ": records needs fields");
+        }
+    }
+
+    /**
+     * An expression is a Cypher expression over the model's node {@code n}: text, no clauses or parameters, and every
+     * property it reads ({@code n.x}) declared in its sources ({@code Label.x}), so lineage is never wrong.
+     */
+    static void checkExpr(Model m, JsonNode expr, List<String> sources, String at, List<String> out) {
+        if (!expr.isTextual() || expr.asText().isBlank()) { out.add(at + ": expr must be a Cypher expression over n (text)"); return; }
+        String text = expr.asText();
+        List<String> problems = ReadOnlyCypher.problems("RETURN " + text);
+        if (!problems.isEmpty()) out.add(at + ": expr " + String.join("; ", problems));
+        String code = ReadOnlyCypher.code(text);
+        if (code.contains("$")) out.add(at + ": expr cannot use parameters");
+        if (code.matches("(?is).*\\b(MATCH|RETURN|UNWIND|CALL)\\b.*")) out.add(at + ": expr is one expression, not a query");
+        Matcher r = PROPERTY_REF.matcher(code);
+        while (r.find()) {
+            if (!r.group(1).equals("n")) { out.add(at + ": expr reads '" + r.group(1) + "." + r.group(2) + "'; an expr reads only the model's node n"); continue; }
+            if (!sources.contains(m.node() + "." + r.group(2)))
+                out.add(at + ": expr reads n." + r.group(2) + ", which is not in its sources (" + m.node() + "." + r.group(2) + ")");
         }
     }
 
@@ -181,22 +214,24 @@ public final class SemanticModelValidator {
     }
 
     // ------------------------------------------------------------------ against the data dictionary
-    /** Problems found comparing the model with the data dictionary (the {@code _catalog} documents). */
+    /** Problems found comparing the model with the data dictionary (the {@code (:_Catalog)} entries, one per label). */
     public static List<String> againstCatalog(SemanticModel sm, JsonNode catalog) {
         Map<String, JsonNode> entries = new HashMap<>();
         catalog.forEach(e -> entries.put(e.path("_id").asText(), e));
         List<String> out = new ArrayList<>();
         for (Model m : sm.models().values()) {
             String at = "model " + m.id();
-            JsonNode entry = entries.get(m.collection());
-            if (entry == null) { out.add(at + ": collection '" + m.collection() + "' is not in the data dictionary"); continue; }
+            JsonNode entry = entries.get(m.node());
+            if (entry == null) { out.add(at + ": label '" + m.node() + "' is not in the data dictionary"); continue; }
             m.joins().forEach((name, j) -> {
-                JsonNode target = entries.get(j.collection());
-                if (target == null) out.add(at + " join " + name + ": collection '" + j.collection() + "' is not in the data dictionary");
-                else if (!j.foreignField().equals(target.path("primaryKey").asText()))
-                    out.add(at + " join " + name + ": " + j.collection() + "." + j.foreignField() + " is not its primary key ("
-                            + target.path("primaryKey").asText() + "), so the join could multiply rows");
-                field(entries, m, j.localField(), at + " join " + name, out);
+                if (!entries.containsKey(j.node())) { out.add(at + " join " + name + ": label '" + j.node() + "' is not in the data dictionary"); return; }
+                String pattern = "in".equals(j.dir()) ? "(:" + j.node() + ")-[:" + j.rel() + "]->(:" + m.node() + ")" : "(:" + m.node() + ")-[:" + j.rel() + "]->(:" + j.node() + ")";
+                JsonNode rel = null;
+                for (JsonNode r : entry.path("relationships"))
+                    if (r.path("type").asText().equals(j.rel()) && r.path("with").asText().equals(j.node()) && r.path("direction").asText().equals(j.dir())) rel = r;
+                if (rel == null) out.add(at + " join " + name + ": the dictionary has no relationship " + pattern);
+                else if (!"many-to-one".equals(rel.path("cardinality").asText()))
+                    out.add(at + " join " + name + ": " + pattern + " is " + rel.path("cardinality").asText() + ", so the join could multiply rows");
             });
             if (m.entity() != null) field(entries, m, m.entity(), at + " entity", out);
             if (m.time() != null) field(entries, m, m.time().field(), at + " time", out);
@@ -227,30 +262,29 @@ public final class SemanticModelValidator {
         return out;
     }
 
-    /** The dictionary entry for a model path (a field, or join.field through a join); null (and a problem) if absent. */
+    /** The dictionary entry for a model path (a property, or join.property through a join); null (and a problem) if absent. */
     private static JsonNode field(Map<String, JsonNode> entries, Model m, String path, String at, List<String> out) {
-        String collection = m.collection();
+        String label = m.node();
         String name = path;
         int dot = path.indexOf('.');
         if (dot > 0 && m.joins().containsKey(path.substring(0, dot))) {
-            collection = m.joins().get(path.substring(0, dot)).collection();
+            label = m.joins().get(path.substring(0, dot)).node();
             name = path.substring(dot + 1);
         }
-        JsonNode entry = entries.get(collection);
-        if (entry == null) { out.add(at + ": collection '" + collection + "' is not in the data dictionary"); return null; }
-        String top = name.contains(".") ? name.substring(0, name.indexOf('.')) : name;
-        for (JsonNode f : entry.path("fields")) if (f.path("name").asText().equals(top)) return f;
-        out.add(at + ": field '" + name + "' is not in the dictionary entry for " + collection);
+        JsonNode entry = entries.get(label);
+        if (entry == null) { out.add(at + ": label '" + label + "' is not in the data dictionary"); return null; }
+        for (JsonNode f : entry.path("properties")) if (f.path("name").asText().equals(name)) return f;
+        out.add(at + ": property '" + name + "' is not in the dictionary entry for " + label);
         return null;
     }
 
     private static void source(Map<String, JsonNode> entries, String ref, String at, List<String> out) {
         int dot = ref.indexOf('.');
-        if (dot < 0) { out.add(at + ": source '" + ref + "' must be collection.field"); return; }
+        if (dot < 0) { out.add(at + ": source '" + ref + "' must be Label.property"); return; }
         JsonNode entry = entries.get(ref.substring(0, dot));
         String name = ref.substring(dot + 1);
-        if (entry == null) { out.add(at + ": source collection of '" + ref + "' is not in the data dictionary"); return; }
-        for (JsonNode f : entry.path("fields")) if (f.path("name").asText().equals(name)) return;
+        if (entry == null) { out.add(at + ": source label of '" + ref + "' is not in the data dictionary"); return; }
+        for (JsonNode f : entry.path("properties")) if (f.path("name").asText().equals(name)) return;
         out.add(at + ": source '" + ref + "' is not in the data dictionary");
     }
 

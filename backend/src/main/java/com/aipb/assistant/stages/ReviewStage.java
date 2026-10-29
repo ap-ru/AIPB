@@ -16,7 +16,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Stage 3 (opt-in) - independent verification, run only when the banker asks. Objective: decide whether the pipeline
+ * Stage 3 (opt-in) - independent verification, run only when the banker asks. Objective: decide whether the query
  * computes what the brief asks and prove a key figure a second way. Sees: the primer, its rules, the data overview and
  * dictionary (static); the page, the data's today, the brief and the built data with its sample output - never the
  * build conversation (dynamic). Gate: {@link ReviewGate}.
@@ -40,14 +40,15 @@ public class ReviewStage {
         rec.context(context.manifest(system, user), user);
         JsonNode[] review = new JsonNode[1];
         boolean[] passed = new boolean[1];
-        runner.toolLoop("review", system, tools.definitions("distinct_values", "run_query", "sample_documents", "submit_review"),
+        runner.toolLoop("review", system, tools.definitions("distinct_values", "graph_schema", "run_query", "sample_nodes", "submit_review"),
                 user, "submit_review", new StageRunner.ToolHandler() {
                     @Override
                     public AssistantTools.Outcome handle(LlmReply.ToolUse use) {
                         JsonNode in = use.input() == null ? JsonNodeFactory.instance.objectNode() : use.input();
                         return switch (use.name()) {
                             case "run_query" -> tools.runQuery(in, ctx);
-                            case "sample_documents" -> tools.sampleDocuments(in, ctx);
+                            case "sample_nodes" -> tools.sampleNodes(in, ctx);
+                            case "graph_schema" -> tools.graphSchema(in, ctx);
                             case "distinct_values" -> tools.distinctValues(in, ctx);
                             case "submit_review" -> {
                                 ReviewGate.Result r = gate.check(in);

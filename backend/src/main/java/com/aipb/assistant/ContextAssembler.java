@@ -3,7 +3,7 @@ package com.aipb.assistant;
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
 import com.aipb.skills.SkillTemplate;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
 import com.aipb.widget.WidgetDataService;
 import com.aipb.widget.WidgetDefinition;
 import com.aipb.widget.WidgetDefinitionRepository;
@@ -44,7 +44,7 @@ public class ContextAssembler {
     /** One manifest line: what the model saw, without the text itself. */
     public record ManifestEntry(String block, String source, int chars, String sha256) {}
 
-    private final SourceData source;
+    private final GraphMcpSource source;
     private final WidgetPrimitives primitives;
     private final WidgetDefinitionRepository library;
     private final WidgetDataService widgetData;
@@ -54,7 +54,7 @@ public class ContextAssembler {
     private volatile JsonNode catalog;
     private volatile long catalogAt;
 
-    public ContextAssembler(SourceData source, WidgetPrimitives primitives, WidgetDefinitionRepository library,
+    public ContextAssembler(GraphMcpSource source, WidgetPrimitives primitives, WidgetDefinitionRepository library,
                             WidgetDataService widgetData, LayoutService layouts, ObjectMapper mapper) {
         this.source = source;
         this.primitives = primitives;
@@ -82,8 +82,8 @@ public class ContextAssembler {
     public List<Block> intakeSystem(SkillTemplate template) {
         JsonNode c = catalog();
         return withTemplate("intake", template, primer(), stage("intake"),
-                new Block("data-overview", "_catalog/_database", CatalogRenderer.overview(c)),
-                new Block("data-index", "_catalog (generated)", CatalogRenderer.index(c)),
+                new Block("data-overview", "(:_Catalog)/_database", CatalogRenderer.overview(c)),
+                new Block("data-index", "(:_Catalog) (generated)", CatalogRenderer.index(c)),
                 new Block("primitive-menu", "widgets/primitives.json", primitiveMenu()));
     }
 
@@ -91,16 +91,16 @@ public class ContextAssembler {
         JsonNode c = catalog();
         List<String> examples = examples(template, "build", BUILD_EXAMPLES);
         return withTemplate("build", template, primer(), stage("build"),
-                new Block("data-overview", "_catalog/_database", CatalogRenderer.overview(c)),
-                new Block("data-dictionary", "_catalog (generated)", CatalogRenderer.dictionary(c)),
+                new Block("data-overview", "(:_Catalog)/_database", CatalogRenderer.overview(c)),
+                new Block("data-dictionary", "(:_Catalog) (generated)", CatalogRenderer.dictionary(c)),
                 new Block("build-examples", "assistant/examples " + examples, buildExamples(examples)));
     }
 
     public List<Block> reviewSystem(SkillTemplate template) {
         JsonNode c = catalog();
         return withTemplate("review", template, primer(), stage("review"),
-                new Block("data-overview", "_catalog/_database", CatalogRenderer.overview(c)),
-                new Block("data-dictionary", "_catalog (generated)", CatalogRenderer.dictionary(c)));
+                new Block("data-overview", "(:_Catalog)/_database", CatalogRenderer.overview(c)),
+                new Block("data-dictionary", "(:_Catalog) (generated)", CatalogRenderer.dictionary(c)));
     }
 
     public List<Block> presentSystem(SkillTemplate template) {
@@ -142,7 +142,7 @@ public class ContextAssembler {
         if (!c.isEmpty()) {
             sb.append("\n## Constraints (checked automatically)\n");
             if (c.scope() != null) sb.append("- scope: ").append(c.scope()).append(" only\n");
-            if (!c.collections().isEmpty()) sb.append("- source collections: ").append(String.join(", ", c.collections())).append('\n');
+            if (!c.labels().isEmpty()) sb.append("- source labels: ").append(String.join(", ", c.labels())).append('\n');
             if (!c.primitives().isEmpty()) sb.append("- display primitives: ").append(String.join(", ", c.primitives())).append('\n');
             if (c.maxRows() != null) sb.append("- at most ").append(c.maxRows()).append(" result rows\n");
             if (!c.handlers().isEmpty()) sb.append("- action handlers: ").append(String.join(", ", c.handlers())).append('\n');
@@ -169,7 +169,7 @@ public class ContextAssembler {
             sb.append("parameters:\n");
             for (Layout.PageParam p : page.getParams()) {
                 String v = params == null ? null : params.get(p.getName());
-                sb.append("- ").append(p.getName()).append(" (").append(p.getLabel()).append(", from ").append(p.getCollection())
+                sb.append("- ").append(p.getName()).append(" (").append(p.getLabel()).append(", from ").append(com.aipb.source.Labels.of(p.getCollection()))
                         .append('.').append(p.getValueField()).append(')');
                 if (v != null) sb.append(" - currently selected: ").append(label(p, v)).append(" (").append(v)
                         .append("); queries are tested with this value");
@@ -222,7 +222,7 @@ public class ContextAssembler {
         }
     }
 
-    /** Field and derived-metric names per collection, for checking catalogReference values. */
+    /** Property and derived-metric names per label, for checking catalogReference values. */
     public Map<String, Set<String>> referenceNames() { return CatalogRenderer.referenceNames(catalog()); }
 
     public List<ManifestEntry> manifest(List<Block> system, String userContext) {
@@ -307,9 +307,8 @@ public class ContextAssembler {
             JsonNode s = starter(id);
             ObjectNode data = mapper.createObjectNode();
             data.set("params", s.path("params"));
-            data.set("collection", s.path("data").path("collection"));
-            data.set("pipeline", s.path("data").path("pipeline"));
-            data.set("columns", s.path("data").path("columns"));
+            data.set("cypher", s.path("data").path("custom").path("cypher"));
+            data.set("columns", s.path("data").path("custom").path("columns"));
             sb.append("\n## ").append(s.path("title").asText()).append("\nBrief: ").append(s.path("description").asText())
                     .append("\n```json\n").append(pretty(data)).append("\n```\n");
         }
@@ -321,7 +320,7 @@ public class ContextAssembler {
         for (String id : ids) {
             JsonNode s = starter(id);
             ObjectNode cols = mapper.createObjectNode();
-            s.path("data").path("columns").forEach(c -> cols.put(c.path("name").asText(),
+            s.path("data").path("custom").path("columns").forEach(c -> cols.put(c.path("name").asText(),
                     c.path("type").asText() + (c.has("unit") ? ", " + c.path("unit").asText() : "")));
             ObjectNode out = mapper.createObjectNode();
             out.put("title", s.path("title").asText());
@@ -354,9 +353,9 @@ public class ContextAssembler {
     }
 
     /**
-     * A worked example: a frozen copy (resources/assistant/examples) of a starter widget as it was written by hand, as a
-     * pipeline. The Build stage writes pipelines, so it learns from these rather than from today's starters, which are
-     * semantic queries; the examples are retired when the assistant moves onto the semantic layer.
+     * A worked example: a starter widget written by hand as Cypher (resources/assistant/examples; each returns what
+     * the starter does). The Build stage writes Cypher, so it learns from these rather than from today's starters, which
+     * are semantic queries; the examples are retired when the assistant moves onto the semantic layer.
      */
     private JsonNode starter(String id) {
         try (InputStream in = new ClassPathResource("assistant/examples/" + id + ".json").getInputStream()) {

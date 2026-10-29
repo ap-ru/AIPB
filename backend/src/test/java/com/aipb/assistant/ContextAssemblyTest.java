@@ -8,7 +8,7 @@ import com.aipb.skills.SkillTemplate;
 import com.aipb.skills.SkillTemplateRegistry;
 import com.aipb.skills.InsightSkill;
 import com.aipb.skills.WidgetSkill;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
 import com.aipb.widget.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,7 +45,7 @@ class ContextAssemblyTest {
     @BeforeEach
     void setUp() throws Exception {
         catalog = mapper.readTree(Path.of("../data/catalog.json").toFile());
-        SourceData source = mock(SourceData.class);
+        GraphMcpSource source = mock(GraphMcpSource.class);
         when(source.catalog()).thenReturn(catalog);
         when(source.asOfDate()).thenReturn("2026-10-16T00:00:00.000Z");
         LayoutService layouts = mock(LayoutService.class);
@@ -110,8 +110,8 @@ class ContextAssemblyTest {
         String system = String.join("\n", ContextAssembler.texts(context.buildSystem()));
         assertThat(system).doesNotContain("2026-10-16").doesNotContain("CL-0002").doesNotContain("Northstar");
         // tool lists are sorted by name
-        assertThat(tools.definitions("submit_data", "run_query", "sample_documents", "distinct_values"))
-                .extracting(LlmRequest.ToolDef::name).containsExactly("distinct_values", "run_query", "sample_documents", "submit_data");
+        assertThat(tools.definitions("submit_data", "run_query", "sample_nodes", "graph_schema", "distinct_values"))
+                .extracting(LlmRequest.ToolDef::name).containsExactly("distinct_values", "graph_schema", "run_query", "sample_nodes", "submit_data");
     }
 
     @Test
@@ -134,7 +134,7 @@ class ContextAssemblyTest {
         assertThat(last.name()).isEqualTo("template-guidance");
         assertThat(last.source()).isEqualTo("skills/templates/exposure-vs-limit.json@v1");
         assertThat(last.text()).contains("# Skill template: Exposure vs. limit", "## For this step", "scope: client only",
-                "source collections: holdings", "display primitives: meter, bar, metric", "at most 25 result rows");
+                "source labels: Holding", "display primitives: meter, bar, metric", "at most 25 result rows");
         // the template's worked examples replace the defaults
         String build = String.join("\n", ContextAssembler.texts(context.buildSystem(exposure)));
         assertThat(context.buildSystem(exposure).get(4).source()).isEqualTo("assistant/examples [client-exposure, client-covenants]");
@@ -154,20 +154,22 @@ class ContextAssemblyTest {
     }
 
     @Test
-    void theDictionaryCoversEveryCollectionFieldAndDerivedMetric() {
+    void theDictionaryCoversEveryLabelPropertyRelationshipAndDerivedMetric() {
         String dict = CatalogRenderer.dictionary(catalog);
         String index = CatalogRenderer.index(catalog);
         for (JsonNode e : catalog) {
-            String coll = e.path("_id").asText();
-            if (coll.startsWith("_")) continue;
-            assertThat(dict).contains("## " + coll);
-            assertThat(index).contains("## " + coll);
-            e.path("fields").forEach(f -> { if (!f.path("name").asText().equals("_id")) assertThat(dict).contains("- " + f.path("name").asText() + " ("); });
+            String label = e.path("_id").asText();
+            if (label.startsWith("_")) continue;
+            assertThat(dict).contains("## " + label);
+            assertThat(index).contains("## " + label);
+            e.path("relationships").forEach(r -> assertThat(dict).contains(r.path("pattern").asText()));
+            e.path("properties").forEach(f -> { if (!f.path("name").asText().equals("_id")) assertThat(dict).contains("- " + f.path("name").asText() + " ("); });
             e.path("derivedMetrics").forEach(d -> assertThat(dict).contains(d.path("name").asText() + ": " + d.path("definition").asText()));
         }
-        assertThat(CatalogRenderer.overview(catalog)).contains("asOfDate").contains("clients.clientId");
-        assertThat(context.referenceNames().get("holdings")).contains("drawnUsd", "utilization");
-        assertThat(context.referenceNames().get("clients")).contains("niiYtdUsd", "feeYtdUsd", "coverageTeam.role");
+        assertThat(CatalogRenderer.overview(catalog)).contains("asOfDate").contains("## Relationships").contains("(:Client)-[:HOLDS]->(:Holding)");
+        assertThat(dict).contains("Stored as JSON text");
+        assertThat(context.referenceNames().get("Holding")).contains("drawnUsd", "utilization");
+        assertThat(context.referenceNames().get("Client")).contains("niiYtdUsd", "feeYtdUsd", "coverageTeam.role");
     }
 
     @Test
@@ -194,10 +196,9 @@ class ContextAssemblyTest {
         JsonNode starter = mapper.readTree(new ClassPathResource("assistant/examples/client-revenue-trend.json").getInputStream());
         ObjectNode artifact = mapper.createObjectNode();
         artifact.set("params", starter.path("params"));
-        artifact.set("collection", starter.path("data").path("collection"));
-        artifact.set("pipeline", starter.path("data").path("pipeline"));
-        artifact.set("columns", starter.path("data").path("columns"));
-        artifact.set("measures", mapper.readTree("[{\"column\":\"revenueUsd\",\"definition\":\"Sum of totalUsd per quarter\",\"catalogReference\":\"revenue_monthly.totalUsd\"}]"));
+        artifact.set("cypher", starter.path("data").path("custom").path("cypher"));
+        artifact.set("columns", starter.path("data").path("custom").path("columns"));
+        artifact.set("measures", mapper.readTree("[{\"column\":\"revenueUsd\",\"definition\":\"Sum of totalUsd per quarter\",\"catalogReference\":\"RevenueMonth.totalUsd\"}]"));
         artifact.set("preview", mapper.readTree("{\"count\":8,\"rows\":[{\"quarter\":\"2024 Q4\",\"revenueUsd\":2550979},{\"quarter\":\"2025 Q1\",\"revenueUsd\":2640918}]}"));
         artifact.set("warnings", mapper.createArrayNode());
         AssistantTools.Context ctx = new AssistantTools.Context("default", "client", Map.of("clientId", "CL-0002"));
@@ -213,14 +214,14 @@ class ContextAssemblyTest {
         PresentStage present = new PresentStage(null, context, null, null, new AssistantProperties(), mapper);
         ReviewStage review = new ReviewStage(null, context, tools, null);
 
-        Map<String, Integer> budgets = Map.of("intake", 6_000, "build", 13_000, "present", 5_000, "review", 11_000);
+        Map<String, Integer> budgets = Map.of("intake", 6_000, "build", 14_000, "present", 5_000, "review", 12_000);
         record Stage(String name, List<ContextAssembler.Block> system, List<LlmRequest.ToolDef> tools, String user) {}
         List<Stage> stages = List.of(
                 new Stage("intake", context.intakeSystem(), List.of(), intakeContext(intake, s, "Show me revenue by quarter")),
-                new Stage("build", context.buildSystem(), tools.definitions("distinct_values", "run_query", "sample_documents", "submit_data"),
+                new Stage("build", context.buildSystem(), tools.definitions("distinct_values", "graph_schema", "run_query", "sample_nodes", "submit_data"),
                         buildContext(build, brief, ctx)),
                 new Stage("present", context.presentSystem(), List.of(), presentContext(present, brief, artifact, ctx)),
-                new Stage("review", context.reviewSystem(), tools.definitions("distinct_values", "run_query", "sample_documents", "submit_review"),
+                new Stage("review", context.reviewSystem(), tools.definitions("distinct_values", "graph_schema", "run_query", "sample_nodes", "submit_review"),
                         reviewContext(review, brief, artifact, ctx)));
         for (Stage st : stages) {
             int staticChars = st.system().stream().mapToInt(b -> b.text().length()).sum()

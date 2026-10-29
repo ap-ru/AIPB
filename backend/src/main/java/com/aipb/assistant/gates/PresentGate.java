@@ -81,6 +81,7 @@ public class PresentGate {
         ObjectNode spec = mapper.createObjectNode();
         String title = design.path("title").asText("Widget");
         spec.put("id", slug(title));
+        spec.put("specVersion", 2);
         spec.put("version", 1);
         spec.put("title", title.length() > 80 ? title.substring(0, 80) : title);
         String desc = design.path("description").asText(title);
@@ -95,9 +96,9 @@ public class PresentGate {
             data.set("columns", queryOverrides(artifact, columns));
         } else {
             spec.set("params", artifact.path("params"));
-            data.set("collection", artifact.path("collection"));
-            data.set("pipeline", artifact.path("pipeline"));
-            data.set("columns", columns);
+            ObjectNode custom = data.putObject("custom");
+            custom.set("cypher", artifact.path("cypher"));
+            custom.set("columns", columns);
         }
 
         ObjectNode view = spec.putObject("view");

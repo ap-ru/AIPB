@@ -3,8 +3,9 @@
   "label": "Activities",
   "version": 1,
   "description": "Interactions logged by the coverage team over the 180 days before the data's today.",
-  "collection": "activities",
+  "node": "Activity",
   "entity": "clientId",
+  "entityJoin": { "rel": "FOR_CLIENT", "dir": "out" },
   "time": { "field": "date", "grain": "month", "closedOnly": false },
   "dimensions": {
     "activityType": "type"

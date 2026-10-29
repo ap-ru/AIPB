@@ -67,11 +67,11 @@ class SkillTemplatesTest {
     }
 
     @Test
-    void everyCollectionATemplateNamesIsInTheDataDictionary() throws Exception {
-        Set<String> collections = new HashSet<>();
-        for (JsonNode c : mapper.readTree(Path.of("../data/catalog.json").toFile())) collections.add(c.path("_id").asText());
+    void everyLabelATemplateNamesIsInTheDataDictionary() throws Exception {
+        Set<String> labels = new HashSet<>();
+        for (JsonNode c : mapper.readTree(Path.of("../data/catalog.json").toFile())) labels.add(c.path("_id").asText());
         for (SkillTemplate t : shipped().all())
-            assertThat(collections).as(t.id() + " collections").containsAll(t.constraints().collections());
+            assertThat(labels).as(t.id() + " labels").containsAll(t.constraints().labels());
     }
 
     @Test

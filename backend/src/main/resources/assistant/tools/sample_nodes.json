@@ -1,0 +1,32 @@
+{
+  "name": "sample_nodes",
+  "strict": false,
+  "description": "Return up to 5 real nodes of one label, optionally filtered and limited to some properties. Call it before relying on a property you have not seen yet - to confirm its exact name, type and shape (e.g. a list, or a JSON-stored record), or to see what typical values look like. Do not use it to compute figures; use run_query for that.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": "A label of the bank graph (see the data dictionary), e.g. Holding."
+      },
+      "filter": {
+        "type": "object",
+        "description": "Optional: property to value (equality), or to a list of values, e.g. {\"clientId\": \"CL-0001\"}."
+      },
+      "properties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional properties to return (all when omitted)."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "1-5, default 3."
+      }
+    },
+    "required": [
+      "label"
+    ]
+  }
+}

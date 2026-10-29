@@ -21,16 +21,18 @@ aipb:
   seed:
     enabled: ${AIPB_SEED:true}
     reset-on-start: ${AIPB_RESET:false}
-  source:
-    # Source data (MongoDB), always pinned to this database and read-only. Pages read it with the driver (uri, as
-    # bank_reader); the assistant explores it through the MongoDB MCP server (mcp-url).
-    uri: ${AIPB_SOURCE_URI:mongodb://localhost:27017/bank}
-    database: ${AIPB_SOURCE_DB:bank}
-    # the same caps the MCP server applies
-    max-documents: 1000
+  graph:
+    # Source data (the bank graph in Neo4j), always pinned to this database and read-only. Pages read it with the
+    # driver (uri); the assistant explores it through the Cypher MCP server (mcp-url).
+    uri: ${AIPB_GRAPH_URI:bolt://localhost:7687}
+    user: ${AIPB_GRAPH_USER:neo4j}
+    password: ${AIPB_GRAPH_PASSWORD:}
+    database: ${AIPB_GRAPH_DB:neo4j}
+    # caps on every query, from either reader
+    max-records: 1000
     max-time-ms: 10000
-    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp}
-    timeout-seconds: ${AIPB_MCP_TIMEOUT:20}
+    mcp-url: ${AIPB_MCP_URL:http://localhost:3001/mcp/}
+    mcp-timeout-seconds: ${AIPB_MCP_TIMEOUT:20}
   assistant:
     # The widget assistant (com.aipb.assistant). Disabled when no API key is set.
     api-key: ${ANTHROPIC_API_KEY:}

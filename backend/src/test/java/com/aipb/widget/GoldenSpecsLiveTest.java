@@ -2,8 +2,8 @@ package com.aipb.widget;
 
 import com.aipb.semantic.QueryExecutor;
 import com.aipb.semantic.SemanticModel;
-import com.aipb.source.DirectSource;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
+import com.aipb.source.GraphSource;
 import com.aipb.support.LiveSources;
 import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,8 +35,8 @@ class GoldenSpecsLiveTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     // the runtime path reads through the driver, as pages do; independent figures are computed from MCP reads
-    private final DirectSource direct = LiveSources.direct(mapper);
-    private final SourceData source = LiveSources.mcp(mapper);
+    private final GraphSource direct = LiveSources.graph(mapper);
+    private final GraphMcpSource source = LiveSources.mcp(mapper, direct);
     private final WidgetDataService data = new WidgetDataService(direct, null, mapper, new QueryExecutor(SemanticModel.fromClasspath(mapper), direct));
     private LocalDate asOf;
 
@@ -65,7 +65,7 @@ class GoldenSpecsLiveTest {
     private void check(String id, String client, JsonNode rows) {
         switch (id) {
             case "client-revenue-ytd" -> {
-                List<JsonNode> rev = docs("revenue_monthly", Map.of("clientId", client));
+                List<JsonNode> rev = docs("RevenueMonth", Map.of("clientId", client));
                 LocalDate yearStart = asOf.withDayOfYear(1);
                 LocalDate priorStart = yearStart.minusYears(1);
                 LocalDate priorEnd = asOf.withDayOfMonth(1).minusYears(1);
@@ -74,26 +74,26 @@ class GoldenSpecsLiveTest {
                         d -> !month(d).isBefore(priorStart) && month(d).isBefore(priorEnd)), within(0.5));
             }
             case "client-exposure" -> {
-                List<JsonNode> credit = docs("holdings", Map.of("clientId", client, "productType", "credit"));
+                List<JsonNode> credit = docs("Holding", Map.of("clientId", client, "productType", "credit"));
                 double drawn = sum(credit, "drawnUsd", d -> true);
                 double committed = sum(credit, "committedUsd", d -> true);
                 assertThat(num(rows.get(0), "exposureUsd")).isCloseTo(drawn, within(0.5));
                 assertThat(num(rows.get(0), "utilization")).isCloseTo(drawn / committed, within(1e-9));
             }
             case "client-deposits" -> {
-                List<JsonNode> dep = docs("holdings", Map.of("clientId", client, "productType", "deposit"));
+                List<JsonNode> dep = docs("Holding", Map.of("clientId", client, "productType", "deposit"));
                 assertThat(num(rows.get(0), "depositsUsd")).isCloseTo(sum(dep, "balanceUsd", d -> true), within(0.5));
                 assertThat(num(rows.get(0), "depositAccounts")).isEqualTo(dep.size());
             }
             case "client-open-pipeline" -> {
-                List<JsonNode> open = docs("opportunities", Map.of("clientId", client)).stream().filter(this::isOpen).toList();
+                List<JsonNode> open = docs("Opportunity", Map.of("clientId", client)).stream().filter(this::isOpen).toList();
                 assertThat(num(rows.get(0), "pipelineUsd")).isCloseTo(sum(open, "expectedRevenueUsd", d -> true), within(0.5));
                 assertThat(num(rows.get(0), "openDeals")).isEqualTo(open.size());
             }
             case "client-revenue-trend" -> {
                 // every one of the last 8 closed quarters, oldest first; a quarter without revenue is 0
                 LocalDate qStart = asOf.withDayOfMonth(1).withMonth((asOf.getMonthValue() - 1) / 3 * 3 + 1);
-                List<JsonNode> rev = docs("revenue_monthly", Map.of("clientId", client));
+                List<JsonNode> rev = docs("RevenueMonth", Map.of("clientId", client));
                 assertThat(rows.size()).isEqualTo(8);
                 for (int i = 0; i < 8; i++) {
                     LocalDate from = qStart.minusMonths(3L * (8 - i)), to = from.plusMonths(3);
@@ -105,7 +105,7 @@ class GoldenSpecsLiveTest {
             case "client-revenue-by-lob" -> {
                 LocalDate from = asOf.withDayOfMonth(1).minusMonths(12);
                 Map<String, Double> byLob = new HashMap<>();
-                docs("revenue_monthly", Map.of("clientId", client)).stream().filter(d -> !month(d).isBefore(from))
+                docs("RevenueMonth", Map.of("clientId", client)).stream().filter(d -> !month(d).isBefore(from))
                         .forEach(d -> byLob.merge(d.get("lob").asText(), d.get("totalUsd").asDouble(), Double::sum));
                 assertThat(rows.size()).isEqualTo(byLob.size());
                 double prev = Double.MAX_VALUE;
@@ -115,7 +115,7 @@ class GoldenSpecsLiveTest {
                 }
             }
             case "client-holdings" -> {
-                List<JsonNode> h = docs("holdings", Map.of("clientId", client));
+                List<JsonNode> h = docs("Holding", Map.of("clientId", client));
                 assertThat(rows.size()).isEqualTo(h.size());
                 Map<String, Double> amounts = new HashMap<>();
                 h.forEach(d -> amounts.put(d.get("productName").asText(),
@@ -128,7 +128,7 @@ class GoldenSpecsLiveTest {
                 });
             }
             case "client-covenants" -> {
-                List<JsonNode> cv = docs("covenants", Map.of("clientId", client));
+                List<JsonNode> cv = docs("Covenant", Map.of("clientId", client));
                 assertThat(rows.size()).isEqualTo(cv.size());
                 List<Double> want = cv.stream().map(d -> d.get("headroomPct").asDouble()).sorted().toList();
                 for (int i = 0; i < rows.size(); i++) {
@@ -137,13 +137,13 @@ class GoldenSpecsLiveTest {
                 }
             }
             case "client-open-opportunities" -> {
-                List<JsonNode> open = docs("opportunities", Map.of("clientId", client)).stream().filter(this::isOpen).toList();
+                List<JsonNode> open = docs("Opportunity", Map.of("clientId", client)).stream().filter(this::isOpen).toList();
                 assertThat(rows.size()).isEqualTo(Math.min(15, open.size()));
                 if (!open.isEmpty())
                     assertThat(num(rows.get(0), "expectedRevenueUsd")).isEqualTo(open.stream().mapToDouble(d -> d.get("expectedRevenueUsd").asDouble()).max().orElse(0));
             }
             case "client-active-signals" -> {
-                List<JsonNode> active = docs("signals", Map.of("clientId", client)).stream()
+                List<JsonNode> active = docs("Signal", Map.of("clientId", client)).stream()
                         .filter(d -> !d.get("stage").asText().equals("Resolved")).toList();
                 assertThat(rows.size()).isEqualTo(Math.min(10, active.size()));
                 String prev = "";
@@ -153,7 +153,7 @@ class GoldenSpecsLiveTest {
                 }
             }
             case "client-contacts" -> {
-                List<JsonNode> ct = docs("contacts", Map.of("clientId", client));
+                List<JsonNode> ct = docs("Contact", Map.of("clientId", client));
                 assertThat(rows.size()).isEqualTo(ct.size());
                 String primary = ct.stream().filter(d -> d.get("isPrimary").asBoolean()).findFirst().orElseThrow().get("name").asText();
                 assertThat(rows.get(0).get("name").asText()).isEqualTo(primary);
@@ -167,7 +167,7 @@ class GoldenSpecsLiveTest {
                     // one find per month keeps each read under the server's 1000-document cap
                     Map<String, Double> byLob = byMonth.computeIfAbsent(m, k -> {
                         Map<String, Double> out = new HashMap<>();
-                        docs("revenue_monthly", Map.of("month", Map.of("$date", k)))
+                        docs("RevenueMonth", Map.of("month", Map.of("$date", k)))
                                 .forEach(d -> out.merge(d.get("lob").asText(), d.get("totalUsd").asDouble(), Double::sum));
                         return out;
                     });
@@ -180,9 +180,17 @@ class GoldenSpecsLiveTest {
     }
 
     // ------------------------------------------------------------------ helpers
-    private List<JsonNode> docs(String collection, Map<String, Object> filter) {
-        SourceReader.Result r = source.find(collection, filter, null, null, 1000);
-        assertThat(r.truncated()).as("golden read of " + collection + " truncated").isFalse();
+    /** Nodes of a label by equality filters; a {"$date": iso} value matches a datetime property (a plain match: no aggregation). */
+    private List<JsonNode> docs(String label, Map<String, Object> filter) {
+        Map.Entry<String, Object> date = filter.entrySet().stream().filter(e -> e.getValue() instanceof Map<?, ?> m && m.containsKey("$date")).findFirst().orElse(null);
+        SourceReader.Result r = date == null ? source.find(label, filter, null, null, 1000)
+                : source.cypher("MATCH (n:" + label + ") WHERE n." + date.getKey() + " = datetime($d) RETURN n", Map.of("d", ((Map<?, ?>) date.getValue()).get("$date")));
+        if (date != null) {
+            List<JsonNode> nodes = new ArrayList<>();
+            r.documents().forEach(d -> nodes.add(d.get("n")));
+            return nodes;
+        }
+        assertThat(r.truncated()).as("golden read of " + label + " truncated").isFalse();
         List<JsonNode> out = new ArrayList<>();
         r.documents().forEach(out::add);
         return out;

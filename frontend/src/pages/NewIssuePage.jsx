@@ -6,7 +6,7 @@ import TopBar from '../components/TopBar.jsx';
 import Icon from '../components/Icon.jsx';
 
 // CM&A workspace · New Issue: the deal calendar per product tab, a historical deal search, and one deal's transaction
-// details. A static page over the hy_* source collections (only High Yield has data so far).
+// details. A static page over the bank graph's Hy* labels (only High Yield has data so far).
 
 const TABS = [
   { id: 'tlb', label: 'TLB / Pro Rata' },

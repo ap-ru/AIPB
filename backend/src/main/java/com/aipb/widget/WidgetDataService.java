@@ -23,11 +23,16 @@ import java.util.*;
  * Runs widget specs. The same path serves a placed widget at render time and the validator's preview, so what was
  * previewed is exactly what renders. A query spec goes through the semantic layer ({@link QueryExecutor}) in a page
  * context resolved by {@link ContextResolver} (client, period, filters); a custom spec's parameters are bound
- * ({@link ParamBinder}) and its pipeline run as written - it takes the client, but not the page's period or filters, and
+ * ({@link ParamBinder}) and its Cypher run as written - it takes the client, but not the page's period or filters, and
  * says so. Either way the columns come back in one shape ({@link ResultSet.Column}).
  */
 @Service
 public class WidgetDataService {
+
+    /** What a custom spec written for MongoDB says when asked to run. */
+    public static final String NEEDS_REBUILD = "this widget's query was written for MongoDB and has to be rebuilt for the graph (custom.cypher)";
+    /** A node label in a Cypher pattern: (n:Label) or (:Label). */
+    private static final java.util.regex.Pattern NODE_LABEL = java.util.regex.Pattern.compile("\\(\\s*[A-Za-z_]?\\w*\\s*:\\s*`?([A-Za-z_]\\w*)");
 
     private final SourceReader source;
     private final WidgetDefinitionRepository definitions;
@@ -96,12 +101,13 @@ public class WidgetDataService {
     /** Runs a spec in a resolved context; {@code asOfDate} (optional) replaces the data's today. Rows are not projected. */
     public DataResult execute(WidgetSpec spec, ContextResolver.Resolved ctx, String asOfDate) {
         if (spec.isQuery()) return executeQuery(spec, ctx, asOfDate);
+        if (spec.custom().needsRebuild())
+            throw new IllegalArgumentException(NEEDS_REBUILD);
         Map<String, String> params = new LinkedHashMap<>();
         if (ctx.entityId() != null) params.put(entityParam(), ctx.entityId());
         if (blankToNull(asOfDate) != null) params.put(ParamBinder.AS_OF_DATE, asOfDate);
         ParamBinder.Bound bound = ParamBinder.bind(spec, params, source::asOfDate);
-        // sent as a JSON tree: converting to Maps would drop nulls such as {"$group": {"_id": null}}
-        SourceReader.Result r = source.aggregate(spec.custom().collection(), (ArrayNode) bound.pipeline());
+        SourceReader.Result r = source.cypher(spec.custom().cypher(), bound.params());
         List<String> notes = new ArrayList<>();
         if (ctx.period() != null || !ctx.filters().isEmpty())
             notes.add("This widget's query is hand-written, so it does not follow the page's period or filters.");
@@ -152,9 +158,9 @@ public class WidgetDataService {
         return requiredParams(spec);
     }
 
-    /** What a spec reads, for listings: a custom spec's collection; a query's models (records: its model). */
+    /** What a spec reads, for listings: the labels a custom spec's Cypher matches; a query's models (records: its model). */
     public String sourceLabel(WidgetSpec spec) {
-        if (!spec.isQuery()) return spec.custom().collection();
+        if (!spec.isQuery()) return spec.custom().needsRebuild() ? spec.custom().collection() : String.join("+", labels(spec.custom().cypher()));
         SemanticQuery q = spec.data().query();
         if (q.records()) return q.model();
         Set<String> models = new LinkedHashSet<>();
@@ -173,12 +179,18 @@ public class WidgetDataService {
         return parse(d.getSpec());
     }
 
-    /** The choices for a page parameter: [{value, label}] from its source collection, sorted by label. */
+    /** The node labels a Cypher query matches, in order of appearance. */
+    public static List<String> labels(String cypher) {
+        Set<String> out = new LinkedHashSet<>();
+        java.util.regex.Matcher m = NODE_LABEL.matcher(com.aipb.source.ReadOnlyCypher.code(cypher == null ? "" : cypher));
+        while (m.find()) out.add(m.group(1));
+        return List.copyOf(out);
+    }
+
+    /** The choices for a page parameter: [{value, label}] from its source label, sorted by label. */
     public List<Map<String, String>> options(Layout.PageParam p) {
-        Map<String, Object> projection = new LinkedHashMap<>();
-        projection.put(p.getValueField(), 1);
-        projection.put(p.getLabelField(), 1);
-        JsonNode docs = source.find(p.getCollection(), null, projection, Map.of(p.getLabelField(), 1), 1000).documents();
+        JsonNode docs = source.find(com.aipb.source.Labels.of(p.getCollection()), null, List.of(p.getValueField(), p.getLabelField()),
+                Map.of(p.getLabelField(), 1), 1000).documents();
         List<Map<String, String>> out = new ArrayList<>();
         docs.forEach(d -> out.add(Map.of("value", d.path(p.getValueField()).asText(), "label", d.path(p.getLabelField()).asText())));
         return out;

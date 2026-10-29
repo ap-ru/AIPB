@@ -1,24 +1,17 @@
 {
   "name": "run_query",
   "strict": false,
-  "description": "Run an aggregation pipeline against the source data with the page's sample parameters (the selected client, and asOfDate) and return up to 20 result rows with the full row count. Call it to test every pipeline before submitting, and to check intermediate assumptions (e.g. totals before and after a $lookup). Errors come back with the database's reason - fix the pipeline and run it again.",
+  "description": "Run a read-only Cypher query against the bank graph with the page's sample parameters (the selected client, and asOfDate) and return up to 20 result rows with the full row count. Call it to test every query before submitting, and to check intermediate assumptions (e.g. totals before and after following a relationship). Errors come back with the database's reason - fix the query and run it again.",
   "input_schema": {
     "type": "object",
     "properties": {
-      "collection": {
+      "cypher": {
         "type": "string",
-        "description": "A data collection of the bank database (see the data dictionary), e.g. holdings."
-      },
-      "pipeline": {
-        "type": "array",
-        "items": {
-          "type": "object"
-        },
-        "description": "MongoDB aggregation stages, read-only. Reference parameters as {\"$param\": \"clientId\"} / {\"$param\": \"asOfDate\"}; never literal client ids or dates."
+        "description": "A read-only Cypher query (MATCH ... RETURN; no CREATE, MERGE, SET, DELETE or CALL ... IN TRANSACTIONS). Use parameters for every value: $clientId for the selected client, $asOfDate for the data's today (ISO text: compare with datetime($asOfDate)). Never literal client ids or dates, never date() or datetime() with no argument. Each RETURN alias is a result column."
       },
       "params": {
         "type": "array",
-        "description": "The parameters the pipeline references as {\"$param\": \"name\"}. Declare asOfDate (type date) whenever the pipeline uses it.",
+        "description": "The parameters the query uses as $name, e.g. clientId (string). $asOfDate is built in: you may declare it (type date) or not.",
         "items": {
           "type": "object",
           "additionalProperties": false,
@@ -29,7 +22,7 @@
           "properties": {
             "name": {
               "type": "string",
-              "description": "clientId or asOfDate (or another page parameter)"
+              "description": "clientId (or another page parameter), or asOfDate"
             },
             "type": {
               "enum": [
@@ -44,8 +37,7 @@
       }
     },
     "required": [
-      "collection",
-      "pipeline",
+      "cypher",
       "params"
     ]
   }

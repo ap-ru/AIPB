@@ -1,6 +1,7 @@
 package com.aipb.assistant.gates;
 
 import com.aipb.skills.SkillTemplate;
+import com.aipb.widget.WidgetDataService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
@@ -31,12 +32,13 @@ public class TemplateGate {
         return errors;
     }
 
-    /** A submit_data submission, before its live run: the source collection. */
+    /** A submit_data submission, before its live run: it reads (at least) one of the template's labels. */
     public List<String> build(JsonNode submission, SkillTemplate t) {
-        List<String> allowed = t.constraints().collections();
-        String coll = submission.path("collection").asText();
-        if (allowed.isEmpty() || allowed.contains(coll)) return List.of();
-        return List.of("the " + t.title() + " template reads " + String.join(", ", allowed) + " only; start from one of these, not " + coll);
+        List<String> allowed = t.constraints().labels();
+        List<String> used = WidgetDataService.labels(submission.path("cypher").asText());
+        if (allowed.isEmpty() || used.stream().anyMatch(allowed::contains)) return List.of();
+        return List.of("the " + t.title() + " template reads " + String.join(", ", allowed) + "; match one of these"
+                + (used.isEmpty() ? "" : ", not only " + String.join(", ", used)));
     }
 
     /** An accepted data artifact: the row count of its sample run. */

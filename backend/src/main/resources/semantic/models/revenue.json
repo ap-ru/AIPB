@@ -3,11 +3,12 @@
   "label": "Revenue",
   "version": 1,
   "description": "Revenue the bank earned (net interest income plus fees), per holding per closed month. The source of every revenue figure.",
-  "collection": "revenue_monthly",
+  "node": "RevenueMonth",
   "entity": "clientId",
+  "entityJoin": { "rel": "FOR_CLIENT", "dir": "out" },
   "time": { "field": "month", "grain": "month", "closedOnly": true },
   "joins": {
-    "product": { "collection": "products", "localField": "productId", "foreignField": "productId" }
+    "product": { "rel": "OF_PRODUCT", "dir": "out", "node": "Product" }
   },
   "dimensions": {
     "lob": "lob",

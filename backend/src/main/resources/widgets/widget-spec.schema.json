@@ -116,24 +116,15 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "collection",
-            "pipeline",
             "columns"
           ],
-          "description": "The escape hatch: a hand-written read-only aggregation over one source collection, and the columns it returns. Use only what the semantic layer cannot express.",
+          "description": "The escape hatch: a hand-written read-only Cypher query over the bank graph, and the columns it returns. Use only what the semantic layer cannot express.",
           "properties": {
-            "collection": {
+            "cypher": {
               "type": "string",
-              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
-              "description": "Source collection the pipeline starts from (see _catalog)."
-            },
-            "pipeline": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "object"
-              },
-              "description": "MongoDB aggregation stages. Read-only. Dates are Extended JSON ({\"$date\": \"...\"}) or params of type date; never compare dates to plain strings and never use $$NOW (use the asOfDate param)."
+              "minLength": 1,
+              "maxLength": 20000,
+              "description": "A read-only Cypher query (MATCH ... RETURN). Every value it needs is a parameter: $clientId and the like, declared in params, and the built-in $asOfDate (ISO text: compare with datetime($asOfDate), never date() or datetime() with no argument). Each RETURN alias is a column."
             },
             "columns": {
               "type": "array",
@@ -142,6 +133,14 @@
               "items": {
                 "$ref": "#/$defs/column"
               }
+            },
+            "collection": {
+              "type": "string",
+              "description": "Written for MongoDB: the collection the pipeline read. Kept to show what to rebuild; never run."
+            },
+            "pipeline": {
+              "type": "array",
+              "description": "Written for MongoDB: the aggregation pipeline. Kept to show what to rebuild; never run."
             }
           }
         }

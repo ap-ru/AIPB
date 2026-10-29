@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 
 /**
  * Validates a {@link SemanticQuery} against the semantic model and plans it: which per-model source queries to run
- * ({@link PhysicalQuery}, compiled by {@link PipelineCompiler}) and how to combine their rows into the answer
+ * ({@link PhysicalQuery}, compiled to Cypher by {@link CypherCompiler}) and how to combine their rows into the answer
  * ({@link Output} expressions over base measures, evaluated by {@link QueryExecutor}).
  *
  * <p>Every requested metric expands into base measures, each with its effective window and comparison shifts.
@@ -204,7 +204,7 @@ public final class QueryPlanner {
         for (List<BaseSpec> group : groups.values()) {
             BaseSpec first = group.get(0);
             Model m = first.model;
-            // segments every measure shares go into the $match (no zero rows for other groups); the rest filter per measure
+            // segments every measure shares go into the WHERE (no zero rows for other groups); the rest filter per measure
             Set<String> common = new LinkedHashSet<>(group.get(0).measure.segments());
             group.forEach(b -> common.retainAll(b.measure.segments()));
             List<Condition> conds = new ArrayList<>(conditions.get(m));

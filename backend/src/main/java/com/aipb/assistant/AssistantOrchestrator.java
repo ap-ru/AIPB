@@ -479,7 +479,7 @@ public class AssistantOrchestrator {
     }
 
     /**
-     * A data artifact for a widget that was not made in a conversation (stock, workbench): its query or pipeline, and
+     * A data artifact for a widget that was not made in a conversation (stock, workbench): its query or Cypher, and
      * its columns and first rows from a live run - what BUILD would have produced, so PRESENT can redesign it as it is.
      * Null when it cannot run here; the first change then rebuilds the data.
      */
@@ -503,8 +503,7 @@ public class AssistantOrchestrator {
             });
         } else {
             JsonNode custom = data.path("custom");
-            a.set("collection", custom.path("collection"));
-            a.set("pipeline", custom.path("pipeline"));
+            a.set("cypher", custom.path("cypher"));
             custom.path("columns").forEach(c -> columns.add(c.deepCopy()));
             if (spec.has("params")) a.set("params", spec.get("params"));
         }

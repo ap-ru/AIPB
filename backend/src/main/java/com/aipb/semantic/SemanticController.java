@@ -1,6 +1,6 @@
 package com.aipb.semantic;
 
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,7 @@ public class SemanticController {
 
     private final SemanticModel sm;
     private final QueryExecutor executor;
-    private final SourceData source;
+    private final GraphMcpSource source;
 
     /** A query, and the selected client (null for the whole book). */
     public record QueryRequest(SemanticQuery query, String entityId) {}
@@ -35,7 +35,7 @@ public class SemanticController {
             e.put("id", md.id());
             e.put("label", md.label());
             e.put("description", md.description());
-            e.put("collection", md.collection());
+            e.put("node", md.node());
             e.put("time", md.time());
             e.put("dates", md.dates().keySet());
             e.put("dimensions", md.dimensions().keySet());

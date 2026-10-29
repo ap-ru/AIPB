@@ -1,7 +1,7 @@
 package com.aipb.semantic;
 
-import com.aipb.source.DirectSource;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
+import com.aipb.source.GraphSource;
 import com.aipb.support.LiveSources;
 import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.within;
 
 /**
  * Conformance of the semantic layer: every metric, run through the planner, the compiler and the driver (as pages read), must
- * match figures computed independently - in plain Java over raw documents read with find (no aggregation, no shared
+ * match figures computed independently - in plain Java over raw nodes read with find (no aggregation, no shared
  * code with the compiler). Covers three clients, a client with no covenants (an edge case) and the whole book.
  * Needs the running stack: {@code mvn test -Dgroups=live -Dsurefire.excludedGroups=}
  */
@@ -32,8 +32,8 @@ class MetricConformanceLiveTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     // the runtime path reads through the driver, as pages do; independent figures are computed from MCP reads
-    private final DirectSource direct = LiveSources.direct(mapper);
-    private final SourceData source = LiveSources.mcp(mapper);
+    private final GraphSource direct = LiveSources.graph(mapper);
+    private final GraphMcpSource source = LiveSources.mcp(mapper, direct);
     private final QueryExecutor executor = new QueryExecutor(SemanticModel.fromClasspath(mapper), direct);
     private LocalDate asOf;
     private List<String> clients;
@@ -42,8 +42,8 @@ class MetricConformanceLiveTest {
     void setUp() {
         asOf = date(source.asOfDate());
         Set<String> withCovenants = new HashSet<>();
-        docs("covenants", Map.of()).forEach(c -> withCovenants.add(c.get("clientId").asText()));
-        String noCovenants = docs("clients", Map.of()).stream().map(c -> c.get("clientId").asText())
+        docs("Covenant", Map.of()).forEach(c -> withCovenants.add(c.get("clientId").asText()));
+        String noCovenants = docs("Client", Map.of()).stream().map(c -> c.get("clientId").asText())
                 .filter(id -> !withCovenants.contains(id)).sorted().findFirst().orElseThrow();
         clients = List.of("CL-0001", "CL-0002", "CL-0017", noCovenants);
     }
@@ -77,7 +77,7 @@ class MetricConformanceLiveTest {
 
     // ------------------------------------------------------------------ client figures
     private void revenueYtd(String c) {
-        List<JsonNode> rev = docs("revenue_monthly", Map.of("clientId", c));
+        List<JsonNode> rev = docs("RevenueMonth", Map.of("clientId", c));
         LocalDate yearStart = asOf.withDayOfYear(1), monthStart = asOf.withDayOfMonth(1);
         double ytd = sum(rev, "totalUsd", d -> !month(d).isBefore(yearStart) && month(d).isBefore(monthStart));
         double prior = sum(rev, "totalUsd", d -> !month(d).isBefore(yearStart.minusYears(1)) && month(d).isBefore(monthStart.minusYears(1)));
@@ -88,7 +88,7 @@ class MetricConformanceLiveTest {
     }
 
     private void revenueByQuarter(String c) {
-        List<JsonNode> rev = docs("revenue_monthly", Map.of("clientId", c));
+        List<JsonNode> rev = docs("RevenueMonth", Map.of("clientId", c));
         LocalDate qStart = asOf.withDayOfMonth(1).withMonth(((asOf.getMonthValue() - 1) / 3) * 3 + 1);
         ResultSet r = run("{\"metrics\": [\"revenueUsd\"], \"dimensions\": [\"quarter\"], \"window\": {\"type\": \"lastClosed\", \"unit\": \"quarter\", \"n\": 8}}", c);
         assertThat(r.rows()).hasSize(8);
@@ -102,7 +102,7 @@ class MetricConformanceLiveTest {
     }
 
     private void revenueByLob(String c) {
-        List<JsonNode> rev = docs("revenue_monthly", Map.of("clientId", c));
+        List<JsonNode> rev = docs("RevenueMonth", Map.of("clientId", c));
         LocalDate to = asOf.withDayOfMonth(1), from = to.minusMonths(12);
         Map<String, Double> byLob = new HashMap<>();
         rev.stream().filter(d -> !month(d).isBefore(from) && month(d).isBefore(to))
@@ -118,7 +118,7 @@ class MetricConformanceLiveTest {
     }
 
     private void balances(String c) {
-        List<JsonNode> h = docs("holdings", Map.of("clientId", c));
+        List<JsonNode> h = docs("Holding", Map.of("clientId", c));
         Predicate<JsonNode> credit = d -> d.get("productType").asText().equals("credit");
         Predicate<JsonNode> deposit = d -> d.get("productType").asText().equals("deposit");
         double drawn = sum(h, "drawnUsd", credit), committed = sum(h, "committedUsd", credit);
@@ -134,7 +134,7 @@ class MetricConformanceLiveTest {
     }
 
     private void pipeline(String c) {
-        List<JsonNode> open = docs("opportunities", Map.of("clientId", c)).stream().filter(d -> !CLOSED.contains(d.get("stage").asText())).toList();
+        List<JsonNode> open = docs("Opportunity", Map.of("clientId", c)).stream().filter(d -> !CLOSED.contains(d.get("stage").asText())).toList();
         double weighted = open.stream().mapToDouble(d -> d.get("expectedRevenueUsd").asDouble() * d.get("probability").asDouble() / 100).sum();
         JsonNode row = run("{\"metrics\": [\"pipelineUsd\", \"openDeals\", \"weightedPipelineUsd\", \"stalledDeals\"]}", c).rows().get(0);
         assertThat(row.get("pipelineUsd").asDouble()).isCloseTo(sum(open, "expectedRevenueUsd", d -> true), within(0.5));
@@ -150,10 +150,10 @@ class MetricConformanceLiveTest {
     }
 
     private void shareOfWallet(String c) {
-        List<JsonNode> rev = docs("revenue_monthly", Map.of("clientId", c));
+        List<JsonNode> rev = docs("RevenueMonth", Map.of("clientId", c));
         LocalDate to = asOf.withDayOfMonth(1), from = to.minusMonths(12);
         double t12m = sum(rev, "totalUsd", d -> !month(d).isBefore(from) && month(d).isBefore(to));
-        double wallet = docs("clients", Map.of("clientId", c)).get(0).get("walletSizeUsd").asDouble();
+        double wallet = docs("Client", Map.of("clientId", c)).get(0).get("walletSizeUsd").asDouble();
         JsonNode row = run("{\"metrics\": [\"shareOfWallet\", \"walletGapUsd\", \"revenueT12mUsd\", \"walletSizeUsd\"]}", c).rows().get(0);
         assertThat(row.get("revenueT12mUsd").asDouble()).isCloseTo(t12m, within(0.5));
         assertThat(row.get("walletSizeUsd").asDouble()).isCloseTo(wallet, within(0.5));
@@ -162,7 +162,7 @@ class MetricConformanceLiveTest {
     }
 
     private void signals(String c) {
-        List<JsonNode> s = docs("signals", Map.of("clientId", c));
+        List<JsonNode> s = docs("Signal", Map.of("clientId", c));
         Predicate<JsonNode> active = d -> !d.get("stage").asText().equals("Resolved");
         JsonNode row = run("{\"metrics\": [\"activeSignals\", \"activeP1Signals\", \"riskAtStakeUsd\"]}", c).rows().get(0);
         assertThat(row.get("activeSignals").asInt()).isEqualTo((int) s.stream().filter(active).count());
@@ -181,9 +181,9 @@ class MetricConformanceLiveTest {
     }
 
     private void covenants(String c) {
-        List<JsonNode> cov = docs("covenants", Map.of("clientId", c));
+        List<JsonNode> cov = docs("Covenant", Map.of("clientId", c));
         Map<String, String> facility = new HashMap<>();
-        docs("holdings", Map.of("clientId", c)).forEach(h -> facility.put(h.get("holdingId").asText(), h.get("productName").asText()));
+        docs("Holding", Map.of("clientId", c)).forEach(h -> facility.put(h.get("holdingId").asText(), h.get("productName").asText()));
         ResultSet list = run("{\"kind\": \"records\", \"model\": \"covenants\", \"fields\": [\"name\", \"facility\", \"actual\", \"threshold\", \"headroomPct\", \"status\"]}", c);
         assertThat(list.rows()).hasSize(cov.size());
         List<JsonNode> sorted = cov.stream().sorted(Comparator.comparingDouble(d -> d.get("headroomPct").asDouble())).toList();
@@ -204,7 +204,7 @@ class MetricConformanceLiveTest {
     }
 
     private void contacts(String c) {
-        List<JsonNode> ct = docs("contacts", Map.of("clientId", c));
+        List<JsonNode> ct = docs("Contact", Map.of("clientId", c));
         ResultSet list = run("{\"kind\": \"records\", \"model\": \"contacts\", \"fields\": [\"name\", \"title\", \"role\", \"lastContactDate\"]}", c);
         assertThat(list.rows()).hasSize(ct.size());
         String primary = ct.stream().filter(d -> d.get("isPrimary").asBoolean()).findFirst().orElseThrow().get("name").asText();
@@ -217,7 +217,7 @@ class MetricConformanceLiveTest {
         ResultSet r = run("{\"metrics\": [\"revenueUsd\"], \"dimensions\": [\"month\", \"lob\"], \"window\": {\"type\": \"trailing\", \"unit\": \"month\", \"n\": 24}}", null);
         Map<String, Double> expected = new HashMap<>();
         for (LocalDate m : months(24))
-            docs("revenue_monthly", Map.of("month", Map.of("$date", iso(m))))
+            month(iso(m))
                     .forEach(d -> expected.merge(m + "|" + d.get("lob").asText(), d.get("totalUsd").asDouble(), Double::sum));
         assertThat(r.rows()).hasSize(24 * 4);
         for (JsonNode row : r.rows())
@@ -229,10 +229,10 @@ class MetricConformanceLiveTest {
     @Test
     void bookTopClientsByRevenueInARegion() {
         Map<String, String> region = new HashMap<>(), name = new HashMap<>();
-        docs("clients", Map.of()).forEach(c -> { region.put(c.get("clientId").asText(), c.get("region").asText()); name.put(c.get("clientId").asText(), c.get("name").asText()); });
+        docs("Client", Map.of()).forEach(c -> { region.put(c.get("clientId").asText(), c.get("region").asText()); name.put(c.get("clientId").asText(), c.get("name").asText()); });
         Map<String, Double> byClient = new HashMap<>();
         for (LocalDate m : months(12))
-            docs("revenue_monthly", Map.of("month", Map.of("$date", iso(m)))).stream().filter(d -> region.get(d.get("clientId").asText()).equals("EMEA"))
+            month(iso(m)).stream().filter(d -> region.get(d.get("clientId").asText()).equals("EMEA"))
                     .forEach(d -> byClient.merge(d.get("clientId").asText(), d.get("totalUsd").asDouble(), Double::sum));
         List<Map.Entry<String, Double>> top = byClient.entrySet().stream().sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(5).toList();
         ResultSet r = run("{\"metrics\": [\"revenueUsd\"], \"dimensions\": [\"client\"], \"window\": {\"type\": \"trailing\", \"unit\": \"month\", \"n\": 12},"
@@ -247,10 +247,10 @@ class MetricConformanceLiveTest {
 
     @Test
     void bookWinRateAndClientsAtRisk() {
-        List<JsonNode> opp = docs("opportunities", Map.of());
+        List<JsonNode> opp = docs("Opportunity", Map.of());
         long won = opp.stream().filter(d -> d.get("stage").asText().equals("Closed Won")).count();
         long lost = opp.stream().filter(d -> d.get("stage").asText().equals("Closed Lost")).count();
-        List<JsonNode> cl = docs("clients", Map.of());
+        List<JsonNode> cl = docs("Client", Map.of());
         JsonNode row = run("{\"metrics\": [\"winRate\", \"wonDeals\", \"clientCount\", \"atRiskClients\"]}", null).rows().get(0);
         assertThat(row.get("wonDeals").asLong()).isEqualTo(won);
         assertThat(row.get("winRate").asDouble()).isCloseTo((double) won / (won + lost), within(1e-9));
@@ -270,11 +270,20 @@ class MetricConformanceLiveTest {
         return out;
     }
 
-    private List<JsonNode> docs(String collection, Map<String, Object> filter) {
-        SourceReader.Result r = source.find(collection, filter, null, null, 1000);
-        assertThat(r.truncated()).as("independent read of " + collection + " truncated").isFalse();
+    private List<JsonNode> docs(String label, Map<String, Object> filter) {
+        SourceReader.Result r = source.find(label, filter, null, null, 1000);
+        assertThat(r.truncated()).as("independent read of " + label + " truncated").isFalse();
         List<JsonNode> out = new ArrayList<>();
         r.documents().forEach(out::add);
+        return out;
+    }
+
+    /** The revenue nodes of one month (a plain match on the datetime: no aggregation). */
+    private List<JsonNode> month(String iso) {
+        SourceReader.Result r = source.cypher("MATCH (n:RevenueMonth) WHERE n.month = datetime($m) RETURN n", Map.of("m", iso));
+        assertThat(r.truncated()).as("independent read of RevenueMonth truncated").isFalse();
+        List<JsonNode> out = new ArrayList<>();
+        r.documents().forEach(d -> out.add(d.get("n")));
         return out;
     }
 

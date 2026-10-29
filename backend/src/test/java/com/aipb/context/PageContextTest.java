@@ -99,8 +99,9 @@ class PageContextTest {
         QueryContext ctx = new QueryContext(AS_OF, null, null, filters);
 
         QueryPlanner.Plan revenue = planner.plan(q("{\"metrics\": [\"revenueUsd\"]}"), ctx);
-        String p = PipelineCompiler.compile(revenue.queries().get(0)).toString();
-        assertThat(p).contains("\"_j_client.region\":{\"$eq\":\"EMEA\"}").contains("\"lob\":{\"$eq\":\"Capital Markets\"}");
+        CypherCompiler.CompiledQuery p = CypherCompiler.compile(revenue.queries().get(0));
+        assertThat(p.cypher()).contains("client.region = $p0").contains("n.lob = $p1");
+        assertThat(p.params()).containsEntry("p0", "EMEA").containsEntry("p1", "Capital Markets");
         assertThat(revenue.applied().filters()).containsExactly("Region: EMEA", "Line of business: Capital Markets");
         assertThat(revenue.notes()).isEmpty();
 
@@ -109,7 +110,7 @@ class PageContextTest {
         assertThat(wallet.notes()).singleElement().asString().contains("Not filtered by line of business").contains("Clients");
 
         QueryPlanner.Plan ignoring = planner.plan(q("{\"metrics\": [\"revenueUsd\"], \"pageFilters\": false}"), ctx);
-        assertThat(PipelineCompiler.compile(ignoring.queries().get(0)).toString()).doesNotContain("EMEA");
+        assertThat(CypherCompiler.compile(ignoring.queries().get(0)).params().values()).doesNotContain("EMEA");
 
         QueryPlanner.Plan records = planner.plan(q("{\"kind\": \"records\", \"model\": \"contacts\"}"), ctx);
         assertThat(records.applied().filters()).containsExactly("Region: EMEA");

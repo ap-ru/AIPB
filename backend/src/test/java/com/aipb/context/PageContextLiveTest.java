@@ -3,8 +3,8 @@ package com.aipb.context;
 import com.aipb.seed.Defaults;
 import com.aipb.semantic.QueryExecutor;
 import com.aipb.semantic.SemanticModel;
-import com.aipb.source.DirectSource;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
+import com.aipb.source.GraphSource;
 import com.aipb.support.LiveSources;
 import com.aipb.source.SourceReader;
 import com.aipb.widget.SpecMigrator;
@@ -33,8 +33,8 @@ class PageContextLiveTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     // the runtime path reads through the driver, as pages do; independent figures are computed from MCP reads
-    private final DirectSource direct = LiveSources.direct(mapper);
-    private final SourceData source = LiveSources.mcp(mapper);
+    private final GraphSource direct = LiveSources.graph(mapper);
+    private final GraphMcpSource source = LiveSources.mcp(mapper, direct);
     private final SemanticModel sm = SemanticModel.fromClasspath(mapper);
     private final ContextResolver resolver = new ContextResolver(sm, direct);
     private final WidgetDataService data = new WidgetDataService(direct, null, mapper, new QueryExecutor(sm, direct));
@@ -52,7 +52,7 @@ class PageContextLiveTest {
 
     @Test
     void withoutAClientTheKpisAreTheWholeBook() throws Exception {
-        List<JsonNode> credit = docs("holdings", Map.of("productType", "credit"));
+        List<JsonNode> credit = docs("Holding", Map.of("productType", "credit"));
         double drawn = credit.stream().mapToDouble(d -> d.get("drawnUsd").asDouble()).sum();
         WidgetDataService.DataResult r = onCommandCenter("client-exposure", Map.of());
         assertThat(r.rows().get(0).get("exposureUsd").asDouble()).isCloseTo(drawn, within(0.5));
@@ -63,10 +63,10 @@ class PageContextLiveTest {
     @Test
     void aPeriodAndARegionNarrowRevenueByLineOfBusiness() throws Exception {
         Set<String> emea = new HashSet<>();
-        docs("clients", Map.of("region", "EMEA")).forEach(c -> emea.add(c.get("clientId").asText()));
+        docs("Client", Map.of("region", "EMEA")).forEach(c -> emea.add(c.get("clientId").asText()));
         Map<String, Double> byLob = new HashMap<>();
         for (LocalDate m = asOf.withDayOfYear(1); m.isBefore(asOf.withDayOfMonth(1)); m = m.plusMonths(1))
-            docs("revenue_monthly", Map.of("month", Map.of("$date", m.atStartOfDay().toInstant(ZoneOffset.UTC).toString()))).stream()
+            docs("RevenueMonth", Map.of("month", Map.of("$date", m.atStartOfDay().toInstant(ZoneOffset.UTC).toString()))).stream()
                     .filter(d -> emea.contains(d.get("clientId").asText()))
                     .forEach(d -> byLob.merge(d.get("lob").asText(), d.get("totalUsd").asDouble(), Double::sum));
         WidgetDataService.DataResult r = onCommandCenter("client-revenue-by-lob", Map.of("period", "ytd", "region", "EMEA"));
@@ -95,8 +95,16 @@ class PageContextLiveTest {
         assertThat(rm.notes()).isEmpty();
     }
 
-    private List<JsonNode> docs(String collection, Map<String, Object> filter) {
-        SourceReader.Result r = source.find(collection, filter, null, null, 1000);
+    /** Nodes of a label by equality filters; a {"$date": iso} value matches a datetime property (a plain match: no aggregation). */
+    private List<JsonNode> docs(String label, Map<String, Object> filter) {
+        Map.Entry<String, Object> date = filter.entrySet().stream().filter(e -> e.getValue() instanceof Map<?, ?> m && m.containsKey("$date")).findFirst().orElse(null);
+        SourceReader.Result r = date == null ? source.find(label, filter, null, null, 1000)
+                : source.cypher("MATCH (n:" + label + ") WHERE n." + date.getKey() + " = datetime($d) RETURN n", Map.of("d", ((Map<?, ?>) date.getValue()).get("$date")));
+        if (date != null) {
+            List<JsonNode> nodes = new ArrayList<>();
+            r.documents().forEach(d -> nodes.add(d.get("n")));
+            return nodes;
+        }
         assertThat(r.truncated()).isFalse();
         List<JsonNode> out = new ArrayList<>();
         r.documents().forEach(out::add);

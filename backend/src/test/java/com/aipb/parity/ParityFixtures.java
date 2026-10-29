@@ -65,7 +65,7 @@ public final class ParityFixtures {
     }
 
     /**
-     * Rows match: the same number, and the same multiset of rows, where numbers agree within 1e-6 (relative, or 1e-6
+     * Rows match: the same number, and the same multiset of rows, where numbers agree within 1e-6 (or 1e-12 relative for large figures,
      * absolute near zero) and dates by instant. Order matters when {@code ordered} (a sorted records list).
      */
     public static Optional<String> rowsMatch(JsonNode want, JsonNode got, boolean ordered) {
@@ -95,7 +95,7 @@ public final class ParityFixtures {
             if (an || bn) { if (an != bn) return Optional.of(n + ": " + b + ", expected " + a); continue; }
             if (a.isNumber() && b.isNumber()) {
                 double x = a.asDouble(), y = b.asDouble();
-                if (Math.abs(x - y) > Math.max(1e-6, Math.abs(x) * 1e-6)) return Optional.of(n + ": " + y + ", expected " + x);
+                if (Math.abs(x - y) > Math.max(1e-6, Math.abs(x) * 1e-12)) return Optional.of(n + ": " + y + ", expected " + x);
             } else if (!text(a).equals(text(b))) return Optional.of(n + ": " + b + ", expected " + a);
         }
         return Optional.empty();

@@ -65,10 +65,10 @@ function Sidebar() {
         {source && (
           <div className="row" style={{ marginTop: 6 }}
             title={source.connected
-              ? `Pages: MongoDB, read directly · Assistant: ${source.mcp?.connected ? `${source.mcp.server} · ${source.mcp.url}` : 'MCP server unreachable'}`
+              ? `Pages: Neo4j, read directly · Assistant: ${source.mcp?.connected ? `${source.mcp.server} · ${source.mcp.url}` : 'MCP server unreachable'}`
               : source.error}>
             <span className="dot" style={source.connected ? undefined : { background: 'var(--red)' }} />
-            <span className="nav-label">{source.connected ? `SOURCE · ${source.database} · ${source.collections.length} collections` : 'SOURCE UNREACHABLE'}</span>
+            <span className="nav-label">{source.connected ? `SOURCE · ${source.database} · ${source.labels?.length ?? 0} labels` : 'SOURCE UNREACHABLE'}</span>
           </div>
         )}
       </div>

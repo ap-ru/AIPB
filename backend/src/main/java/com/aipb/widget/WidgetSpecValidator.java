@@ -4,7 +4,8 @@ import com.aipb.model.Layout;
 import com.aipb.semantic.ResultSet;
 import com.aipb.semantic.SemanticQueryException;
 import com.aipb.service.LayoutService;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
+import com.aipb.source.ReadOnlyCypher;
 import com.aipb.source.SourceException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,8 +18,9 @@ import java.util.*;
 
 /**
  * Checks a widget spec before it can be saved, in two passes. Static: the schema; for a query, that the semantic layer
- * can answer it (metrics, dimensions, windows, filters) and the column overrides; for custom data, the collection,
- * parameters, forbidden operators and units vs formats; then, for both, the primitive's roles against the columns
+ * can answer it (metrics, dimensions, windows, filters) and the column overrides; for custom data, that it is Cypher
+ * (not a MongoDB pipeline to rebuild), read-only, free of the wall clock, over labels the graph has, with every
+ * parameter declared, and units vs formats; then, for both, the primitive's roles against the columns
  * the widget will have, and whether the target page can supply what it needs. Live (only when static passed): the
  * data is run with sample parameters and its real rows are checked against those columns, the primitive's row limits
  * and unit sanity. Every spec format is accepted (read through {@link SpecMigrator}). Messages say what to change.
@@ -28,19 +30,21 @@ import java.util.*;
 public class WidgetSpecValidator {
 
     static final int PREVIEW_ROWS = 50;
-    private static final Set<String> WRITE_STAGES = Set.of("$out", "$merge");
-    private static final Set<String> SERVER_JS = Set.of("$function", "$where", "$accumulator");
+    /** The wall clock in Cypher: date(), datetime(), timestamp() ... with no argument, and their realtime/statement/transaction forms. */
+    private static final java.util.regex.Pattern WALL_CLOCK = java.util.regex.Pattern.compile(
+            "(?i)(?<![\\w.$])(?:(?:date|datetime|localdatetime|localtime|time)(?:\\s*\\.\\s*(?:realtime|statement|transaction))?\\s*\\(\\s*\\)|timestamp\\s*\\(\\s*\\))");
     private static final Set<String> VIEW_KEYS = Set.of("value", "compare", "secondary", "x", "y", "orientation", "stacked",
             "columns", "title", "subtitle", "badge", "meta", "reference", "emphasis", "polarity", "headline", "warnAt", "series",
             "statements", "figures");
     static final String NARRATIVE = "narrative";
     private static final Set<String> ADDITIVE_UNITS = Set.of("USD", "count");
-    private static final String EMPTY_HINT = "Common causes: comparing a date field to a plain string (use a date param or "
-            + "{\"$date\": ...}), a filter value that does not exist (check allowedValues in _catalog), or a field name typo.";
+    private static final String EMPTY_HINT = "Common causes: comparing a date property to plain text (wrap it: datetime($asOfDate)), "
+            + "a filter value that does not exist (check allowedValues in the data dictionary), a relationship followed the wrong "
+            + "way, or a property name typo.";
 
     private final WidgetPrimitives primitives;
     private final WidgetDataService data;
-    private final SourceData source;
+    private final GraphMcpSource source;
     private final LayoutService layouts;
     private final ObjectMapper mapper;
 
@@ -72,7 +76,7 @@ public class WidgetSpecValidator {
     /** The semantic layer must be able to answer the query; overrides must name its columns. Returns the widget's columns. */
     private List<ResultSet.Column> checkQuery(WidgetSpec spec, Issues is) {
         if (!spec.paramsOrEmpty().isEmpty())
-            is.error("params", "params", "a query spec takes the client and dates from the page; remove params (they are for custom pipelines)");
+            is.error("params", "params", "a query spec takes the client and dates from the page; remove params (they are for custom Cypher)");
         List<ResultSet.Column> cols;
         try {
             cols = data.columns(spec);
@@ -94,29 +98,41 @@ public class WidgetSpecValidator {
         return cols;
     }
 
-    /** The escape hatch's own rules: collection, parameters, read-only operators, declared columns. */
+    /** The escape hatch's own rules: Cypher (not a pipeline to rebuild), read-only, labels, parameters, declared columns. */
     private List<ResultSet.Column> checkCustom(WidgetSpec spec, Issues is) {
-        checkCollection(spec, is);
+        if (spec.custom().needsRebuild()) {
+            is.error("needs_rebuild", "data.custom", "this custom widget was written for MongoDB (collection '" + spec.custom().collection()
+                    + "' and an aggregation pipeline); the bank data is now a graph, so rewrite it as read-only Cypher in data.custom.cypher"
+                    + " - or, better, as a semantic query (data.query)");
+            return null;
+        }
+        String cypher = spec.custom().cypher();
+        ReadOnlyCypher.problems(cypher).forEach(p -> is.error("read_only", "data.custom.cypher", p));
+        java.util.regex.Matcher clock = WALL_CLOCK.matcher(ReadOnlyCypher.code(cypher));
+        if (clock.find())
+            is.error("wall_clock", "data.custom.cypher", clock.group().replaceAll("\\s+", "") + " is the wall clock; the data has its own 'today' - "
+                    + "use datetime($asOfDate) (built in) instead");
+        checkLabels(spec, is);
         checkParams(spec, is);
-        checkOperators(spec.custom().pipeline(), is);
         checkColumns(spec, is);
         return data.columns(spec);
     }
 
     // ------------------------------------------------------------------ static
-    private void checkCollection(WidgetSpec spec, Issues is) {
-        String c = spec.custom().collection();
-        if (c.startsWith("_")) {
-            is.error("collection", "data.collection", "'" + c + "' is metadata, not data; widgets read data collections");
+    private void checkLabels(WidgetSpec spec, Issues is) {
+        List<String> used = WidgetDataService.labels(spec.custom().cypher());
+        if (used.isEmpty()) {
+            is.error("labels", "data.custom.cypher", "the query matches no label; start from one, e.g. MATCH (h:Holding) WHERE h.clientId = $clientId");
             return;
         }
+        for (String l : used) if (l.startsWith("_"))
+            is.error("labels", "data.custom.cypher", "'" + l + "' is metadata, not data; widgets read data labels");
         try {
-            List<String> all = source.collectionsCached();
-            if (!all.contains(c))
-                is.error("collection", "data.collection", "no collection '" + c + "' in the source; available: "
-                        + String.join(", ", all.stream().filter(x -> !x.startsWith("_")).toList()));
+            List<String> all = source.labelsCached();
+            used.stream().filter(l -> !l.startsWith("_") && !all.contains(l)).forEach(l ->
+                    is.error("labels", "data.custom.cypher", "no label '" + l + "' in the graph; labels: " + String.join(", ", all)));
         } catch (SourceException e) {
-            is.error("source_unavailable", "data.collection", "cannot reach the source data to check the collection: " + e.getMessage());
+            is.error("source_unavailable", "data.custom.cypher", "cannot reach the source data to check the labels: " + e.getMessage());
         }
     }
 
@@ -127,33 +143,11 @@ public class WidgetSpecValidator {
             if (ParamBinder.AS_OF_DATE.equals(p.name()) && !"date".equals(p.type()))
                 is.error("params", "params", "asOfDate is built in and must have type date");
         }
-        Set<String> used = ParamBinder.referenced(spec.custom().pipeline());
-        used.stream().filter(u -> !declared.contains(u)).forEach(u ->
-                is.error("params", "data.pipeline", "pipeline uses {\"$param\": \"" + u + "\"} but '" + u + "' is not declared in params"));
+        Set<String> used = ParamBinder.referenced(spec.custom().cypher());
+        used.stream().filter(u -> !declared.contains(u) && !ParamBinder.AS_OF_DATE.equals(u)).forEach(u ->
+                is.error("params", "data.custom.cypher", "the query uses $" + u + " but '" + u + "' is not declared in params"));
         declared.stream().filter(d -> !used.contains(d)).forEach(d ->
-                is.warn("params", "params", "parameter '" + d + "' is declared but never used in the pipeline"));
-    }
-
-    private void checkOperators(JsonNode node, Issues is) {
-        if (node == null) return;
-        if (node.isTextual()) {
-            String t = node.asText();
-            if (t.equals("$$NOW") || t.equals("$$CLUSTER_TIME"))
-                is.error("wall_clock", "data.pipeline", t + " is the wall clock; the data has its own 'today' - declare the asOfDate "
-                        + "param (type date) and use {\"$param\": \"asOfDate\"}");
-            return;
-        }
-        if (node.isObject()) {
-            node.fields().forEachRemaining(e -> {
-                if (WRITE_STAGES.contains(e.getKey()))
-                    is.error("write_stage", "data.pipeline", e.getKey() + " writes data; widget pipelines are read-only");
-                if (SERVER_JS.contains(e.getKey()))
-                    is.error("server_js", "data.pipeline", e.getKey() + " runs server-side JavaScript, which is disabled; use aggregation operators");
-                checkOperators(e.getValue(), is);
-            });
-        } else if (node.isArray()) {
-            node.forEach(n -> checkOperators(n, is));
-        }
+                is.warn("params", "params", "parameter '" + d + "' is declared but never used in the query"));
     }
 
     private void checkColumns(WidgetSpec spec, Issues is) {
@@ -315,20 +309,20 @@ public class WidgetSpecValidator {
             e.issues().forEach(i -> is.error("query", "data.query" + (i.path().isEmpty() ? "" : "." + i.path()), i.message()));
             return is.report(sample, null);
         } catch (SourceException e) {
-            is.error("query", spec.isQuery() ? "data.query" : "data.custom.pipeline", "the query failed: " + e.getMessage());
+            is.error("query", spec.isQuery() ? "data.query" : "data.custom.cypher", "the query failed: " + e.getMessage());
             return is.report(sample, null);
         }
         JsonNode rows = r.rows();
         JsonNode prim = primitives.primitive(spec.view().primitive());
         JsonNode limits = spec.view().x() != null && prim.has("rowsWithX") ? prim.path("rowsWithX") : prim.path("rows");
         String where = " for " + (sample.isEmpty() ? "the sample run" : sample);
-        String dataPath = spec.isQuery() ? "data.query" : "data.custom.pipeline";
+        String dataPath = spec.isQuery() ? "data.query" : "data.custom.cypher";
         // with a series role, the rows are periods x series: the primitive's limits apply to the periods (or categories)
         int count = spec.view().series() == null ? r.count() : distinct(rows, spec.view().x());
 
         if (r.truncated())
             is.error("truncated", dataPath, "the query produced " + (r.total() == null ? "too many" : r.total())
-                    + " rows and was cut off at " + r.count() + "; " + (spec.isQuery() ? "add a filter, a coarser dimension or a limit" : "group, filter or $limit in the pipeline"));
+                    + " rows and was cut off at " + r.count() + "; " + (spec.isQuery() ? "add a filter, a coarser dimension or a limit" : "aggregate, filter or LIMIT in the query"));
         if (r.count() == 0) {
             if (limits.path("min").asInt(0) > 0) is.error("empty", dataPath, "the query returned no rows" + where + ". " + EMPTY_HINT);
             else is.warn("empty", dataPath, "the query returned no rows" + where + "; fine if that can happen, otherwise: " + EMPTY_HINT);
@@ -337,7 +331,7 @@ public class WidgetSpecValidator {
                 is.error("rows", "view.primitive", spec.view().primitive() + " needs at least " + limits.path("min").asInt() + " rows; got " + count);
             if (limits.has("max") && count > limits.path("max").asInt())
                 is.error("rows", "view.primitive", spec.view().primitive() + " shows at most " + limits.path("max").asInt() + " rows; got "
-                        + count + (spec.view().primitive().equals("metric") ? " - end the pipeline in one row ($group with _id: null)" : " - group or $limit"));
+                        + count + (spec.view().primitive().equals("metric") ? " - return one row (aggregate with no grouping key)" : " - aggregate or LIMIT"));
             else if (limits.has("warn") && count > limits.path("warn").asInt())
                 is.warn("rows", "view.primitive", count + " rows is a lot for a " + spec.view().primitive() + "; consider grouping or a top-N");
             if (spec.view().series() != null && distinct(rows, spec.view().series()) > 4)
@@ -412,7 +406,7 @@ public class WidgetSpecValidator {
             for (JsonNode row : rows) {
                 String x = row.path(spec.view().x()).asText(null);
                 if (prev != null && x != null && x.compareTo(prev) < 0) {
-                    is.warn("order", spec.isQuery() ? "data.query.sort" : "data.custom.pipeline", spec.view().primitive() + " x values are not ascending; "
+                    is.warn("order", spec.isQuery() ? "data.query.sort" : "data.custom.cypher", spec.view().primitive() + " x values are not ascending; "
                             + (spec.isQuery() ? "sort by " + spec.view().x() + " ascending" : "add {\"$sort\": {\"" + spec.view().x() + "\": 1}}"));
                     break;
                 }
@@ -428,7 +422,7 @@ public class WidgetSpecValidator {
         String f = c.formatOrDefault();
         if (f.equals("percent") && median > 2)
             is.error("unit_scale", path, "column '" + c.name() + "' is formatted percent (a 0-1 ratio) but its values look like 0-100 (median "
-                    + median + "); use unit percent with format percentPoints, or divide by 100 in the pipeline");
+                    + median + "); use unit percent with format percentPoints, or divide by 100 in the query");
         if (f.equals("percentPoints") && abs[abs.length - 1] <= 1 && median > 0)
             is.warn("unit_scale", path, "column '" + c.name() + "' is formatted percentPoints (0-100) but every value is <= 1; "
                     + "if these are ratios use unit ratio with format percent");

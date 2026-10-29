@@ -7,79 +7,43 @@
     {
       "name": "clientId",
       "type": "string",
-      "description": "Client key (clients.clientId), e.g. CL-0001"
+      "description": "Client key (Client.clientId), e.g. CL-0001"
     }
   ],
   "data": {
-    "collection": "signals",
-    "pipeline": [
-      {
-        "$match": {
-          "clientId": {
-            "$param": "clientId"
-          },
-          "stage": {
-            "$ne": "Resolved"
+    "custom": {
+      "cypher": "MATCH (s:Signal)-[:ABOUT]->(:Client {clientId: $clientId})\nWHERE s.stage <> 'Resolved'\nRETURN s.title AS title, s.category + ' · ' + s.type + ' · ' + s.stage AS subtitle, s.severity AS severity, s.detectedAt AS detectedAt\nORDER BY severity, detectedAt DESC\nLIMIT 10",
+      "columns": [
+        {
+          "name": "title",
+          "type": "string",
+          "label": "Signal"
+        },
+        {
+          "name": "subtitle",
+          "type": "string",
+          "label": "Category · type · stage"
+        },
+        {
+          "name": "severity",
+          "type": "string",
+          "format": "badge",
+          "label": "Severity",
+          "tones": {
+            "P1": "bad",
+            "P2": "warn",
+            "P3": "info"
           }
+        },
+        {
+          "name": "detectedAt",
+          "type": "date",
+          "unit": "date",
+          "format": "date",
+          "label": "Detected"
         }
-      },
-      {
-        "$sort": {
-          "severity": 1,
-          "detectedAt": -1
-        }
-      },
-      {
-        "$limit": 10
-      },
-      {
-        "$project": {
-          "_id": 0,
-          "title": 1,
-          "severity": 1,
-          "detectedAt": 1,
-          "subtitle": {
-            "$concat": [
-              "$category",
-              " · ",
-              "$type",
-              " · ",
-              "$stage"
-            ]
-          }
-        }
-      }
-    ],
-    "columns": [
-      {
-        "name": "title",
-        "type": "string",
-        "label": "Signal"
-      },
-      {
-        "name": "subtitle",
-        "type": "string",
-        "label": "Category · type · stage"
-      },
-      {
-        "name": "severity",
-        "type": "string",
-        "format": "badge",
-        "label": "Severity",
-        "tones": {
-          "P1": "bad",
-          "P2": "warn",
-          "P3": "info"
-        }
-      },
-      {
-        "name": "detectedAt",
-        "type": "date",
-        "unit": "date",
-        "format": "date",
-        "label": "Detected"
-      }
-    ]
+      ]
+    }
   },
   "view": {
     "primitive": "list",

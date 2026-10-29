@@ -15,7 +15,7 @@ import java.util.*;
 
 /**
  * The semantic layer: the one place business meaning lives. Loaded from resources/semantic - conformed dimensions
- * (dimensions.json), one model per source collection (models/*.json) and derived metrics (metrics.json). Measures and
+ * (dimensions.json), one model per node label of the bank graph (models/*.json) and derived metrics (metrics.json). Measures and
  * derived metrics share one namespace of metric ids, so a query just names {@code revenueUsd} or {@code utilization}.
  *
  * <p>Models of client-owned rows inherit the entity model's dimensions (region, industry, tier, ...) through an
@@ -118,7 +118,7 @@ public final class SemanticModel {
 
     private static Model parseModel(ObjectMapper mapper, JsonNode m) {
         String id = m.path("id").asText();
-        String collection = m.path("collection").asText();
+        String node = m.path("node").asText();
         Model.TimeSpec time = m.hasNonNull("time")
                 ? new Model.TimeSpec(m.path("time").path("field").asText(), m.path("time").path("grain").asText("month"),
                 m.path("time").path("closedOnly").asBoolean(false))
@@ -126,8 +126,8 @@ public final class SemanticModel {
         Map<String, String> dates = new LinkedHashMap<>();
         m.path("dates").fields().forEachRemaining(e -> dates.put(e.getKey(), e.getValue().asText()));
         Map<String, Model.Join> joins = new LinkedHashMap<>();
-        m.path("joins").fields().forEachRemaining(e -> joins.put(e.getKey(), new Model.Join(e.getValue().path("collection").asText(),
-                e.getValue().path("localField").asText(), e.getValue().path("foreignField").asText())));
+        m.path("joins").fields().forEachRemaining(e -> joins.put(e.getKey(), join(e.getValue())));
+        Model.Join entityJoin = m.hasNonNull("entityJoin") ? join(m.get("entityJoin")) : null;
         Map<String, Model.Binding> bindings = new LinkedHashMap<>();
         m.path("dimensions").fields().forEachRemaining(e -> bindings.put(e.getKey(), e.getValue().isTextual()
                 ? new Model.Binding(e.getValue().asText(), null)
@@ -160,14 +160,19 @@ public final class SemanticModel {
             r.path("defaultSort").forEach(s -> sort.add(new Model.SortKey(s.path("by").asText(), s.path("dir").asText("asc"))));
             records = new Model.Records(r.path("key").asText(), List.copyOf(fields), List.copyOf(sort));
         }
-        return new Model(id, m.path("label").asText(id), m.path("version").asInt(1), m.path("description").asText(""), collection,
-                text(m, "entity"), m.path("entityModel").asBoolean(false), time, dates, joins, bindings, segments,
+        return new Model(id, m.path("label").asText(id), m.path("version").asInt(1), m.path("description").asText(""), node,
+                text(m, "entity"), m.path("entityModel").asBoolean(false), entityJoin, time, dates, joins, bindings, segments,
                 List.copyOf(measures), records);
     }
 
+    private static Model.Join join(JsonNode j) {
+        return new Model.Join(j.path("rel").asText(), j.path("dir").asText("out"), text(j, "node"));
+    }
+
     /**
-     * Every client-owned model gets a many-to-one join to the entity model, named after the entity dimension, and every
-     * entity dimension it does not bind itself (client shown by name, region, industry, ...).
+     * Every client-owned model gets a many-to-one join to the entity model, named after the entity dimension, through
+     * its {@code entityJoin} relationship, and every entity dimension it does not bind itself (client shown by name,
+     * region, industry, ...).
      */
     private static Map<String, Model> inheritEntity(Map<String, Model> models) {
         Model entity = models.values().stream().filter(Model::entityModel).findFirst().orElse(null);
@@ -177,15 +182,15 @@ public final class SemanticModel {
         if (joinName == null) return models;
         Map<String, Model> out = new LinkedHashMap<>();
         for (Model m : models.values()) {
-            if (m.entityModel() || m.entity() == null) { out.put(m.id(), m); continue; }
+            if (m.entityModel() || m.entity() == null || m.entityJoin() == null) { out.put(m.id(), m); continue; }
             Map<String, Model.Join> joins = new LinkedHashMap<>(m.joins());
-            joins.putIfAbsent(joinName, new Model.Join(entity.collection(), m.entity(), entity.entity()));
+            joins.putIfAbsent(joinName, new Model.Join(m.entityJoin().rel(), m.entityJoin().dir(), entity.node()));
             Map<String, Model.Binding> bindings = new LinkedHashMap<>(m.dimensions());
             entity.dimensions().forEach((dim, b) -> bindings.putIfAbsent(dim, b.field().equals(entity.entity())
                     ? new Model.Binding(m.entity(), b.display() == null ? null : joinName + "." + b.display())
                     : new Model.Binding(joinName + "." + b.field(), b.display() == null ? null : joinName + "." + b.display())));
-            out.put(m.id(), new Model(m.id(), m.label(), m.version(), m.description(), m.collection(), m.entity(), false, m.time(),
-                    m.dates(), joins, bindings, m.segments(), m.measures(), m.records()));
+            out.put(m.id(), new Model(m.id(), m.label(), m.version(), m.description(), m.node(), m.entity(), false, m.entityJoin(),
+                    m.time(), m.dates(), joins, bindings, m.segments(), m.measures(), m.records()));
         }
         return out;
     }
@@ -210,7 +215,7 @@ public final class SemanticModel {
 
     /**
      * Fills each measure's and record field's catalog references (for lineage) from its field when none are given:
-     * the field itself, or through a join the joined collection's field. Runs after joins are complete.
+     * the property itself ({@code Label.property}), or through a join the joined label's. Runs after joins are complete.
      */
     private static Model withDefaultSources(Model m) {
         List<Model.Measure> measures = m.measures().stream().map(ms -> ms.sources().isEmpty() && ms.field() != null
@@ -220,15 +225,15 @@ public final class SemanticModel {
                 .map(f -> f.sources().isEmpty() && f.field() != null
                         ? new Model.RecordField(f.id(), f.label(), f.field(), f.expr(), List.of(source(m, f.field())), f.type(), f.unit(),
                         f.dimension(), f.unitFrom(), f.description()) : f).toList(), m.records().defaultSort());
-        return new Model(m.id(), m.label(), m.version(), m.description(), m.collection(), m.entity(), m.entityModel(), m.time(),
-                m.dates(), m.joins(), m.dimensions(), m.segments(), measures, records);
+        return new Model(m.id(), m.label(), m.version(), m.description(), m.node(), m.entity(), m.entityModel(), m.entityJoin(),
+                m.time(), m.dates(), m.joins(), m.dimensions(), m.segments(), measures, records);
     }
 
     private static String source(Model m, String field) {
         int dot = field.indexOf('.');
         if (dot > 0 && m.joins().containsKey(field.substring(0, dot)))
-            return m.joins().get(field.substring(0, dot)).collection() + "." + field.substring(dot + 1);
-        return m.collection() + "." + field;
+            return m.joins().get(field.substring(0, dot)).node() + "." + field.substring(dot + 1);
+        return m.node() + "." + field;
     }
 
     private static List<Condition> conditions(JsonNode where) {

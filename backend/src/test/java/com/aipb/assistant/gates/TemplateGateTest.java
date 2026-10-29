@@ -17,7 +17,7 @@ class TemplateGateTest {
 
     private final SkillTemplate exposure = new SkillTemplate("exposure-vs-limit", 1, "widget", "Exposure vs. limit", "s", "gauge", "Credit",
             List.of("client"), null, null,
-            new SkillTemplate.Constraints(List.of("meter", "bar"), List.of("holdings"), null, "client", null, 25),
+            new SkillTemplate.Constraints(List.of("meter", "bar"), List.of("Holding"), null, "client", null, 25),
             new SkillTemplate.Defaults(Map.of("display", "meter")), null, null);
     private final SkillTemplate custom = new SkillTemplate("custom-widget", 1, "widget", "Custom widget", "s", "spark", "General",
             List.of("client", "book"), null, null, null, null, null, null);
@@ -29,7 +29,7 @@ class TemplateGateTest {
     @Test
     void aTemplateWithoutConstraintsNeverObjects() {
         assertThat(gate.intake(json("{\"scope\":\"book\",\"display\":\"table\"}"), custom)).isEmpty();
-        assertThat(gate.build(json("{\"collection\":\"signals\"}"), custom)).isEmpty();
+        assertThat(gate.build(json("{\"cypher\":\"MATCH (s:Signal) RETURN s\"}"), custom)).isEmpty();
         assertThat(gate.rows(json("{\"preview\":{\"count\":5000}}"), custom)).isEmpty();
         assertThat(gate.present(json("{\"primitive\":\"list\"}"), custom)).isEmpty();
         JsonNode brief = json("{\"display\":\"any\",\"assumptions\":[]}");
@@ -41,8 +41,8 @@ class TemplateGateTest {
         assertThat(gate.intake(json("{\"scope\":\"book\",\"display\":\"any\"}"), exposure)).singleElement().asString().contains("client-scope");
         assertThat(gate.intake(json("{\"scope\":\"client\",\"display\":\"line\"}"), exposure)).singleElement().asString().contains("meter / bar only");
         assertThat(gate.intake(json("{\"scope\":\"client\",\"display\":\"bar\"}"), exposure)).isEmpty();
-        assertThat(gate.build(json("{\"collection\":\"revenue_monthly\"}"), exposure)).singleElement().asString().contains("reads holdings only");
-        assertThat(gate.build(json("{\"collection\":\"holdings\"}"), exposure)).isEmpty();
+        assertThat(gate.build(json("{\"cypher\":\"MATCH (r:RevenueMonth) RETURN r\"}"), exposure)).singleElement().asString().contains("reads Holding").contains("not only RevenueMonth");
+        assertThat(gate.build(json("{\"cypher\":\"MATCH (:Client {clientId: $clientId})-[:HOLDS]->(h:Holding) RETURN h\"}"), exposure)).isEmpty();
         assertThat(gate.rows(json("{\"preview\":{\"count\":26}}"), exposure)).singleElement().asString().contains("at most 25");
         assertThat(gate.rows(json("{\"preview\":{\"count\":25}}"), exposure)).isEmpty();
         assertThat(gate.present(json("{\"primitive\":\"table\"}"), exposure)).singleElement().asString().contains("not table");

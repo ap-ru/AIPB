@@ -5,10 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * Reads every spec format as the current one. Format 1 (no specVersion; data = collection + pipeline + columns) is
- * exactly format 2's custom data, so the move is lossless: data becomes {custom: {collection, pipeline, columns}}.
- * Everything that accepts a spec - the validator, the library, the assistant's gates - reads through here, so stored
- * definitions, the workbench and the assistant keep working while the format moves on.
+ * Reads every spec format as the current one. Format 1 (no specVersion; data = collection + pipeline + columns) moves
+ * to format 2's custom data: {custom: {collection, pipeline, columns}}. Everything that accepts a spec - the validator,
+ * the library, the assistant's gates - reads through here, so stored definitions, the workbench and the assistant keep
+ * working while the format moves on.
+ *
+ * <p>On the graph, custom data is Cypher ({@code custom.cypher}). A MongoDB pipeline cannot be translated
+ * mechanically, so a custom spec without Cypher reads as {@link WidgetSpec.Custom#needsRebuild()}: the validator
+ * reports it, the page shows "rebuild for the graph", and nothing runs it. Query specs migrate untouched - the
+ * semantic layer compiles them for the graph.
  */
 public final class SpecMigrator {
 

@@ -17,8 +17,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Minimal MCP client over the Streamable HTTP transport (JSON responses). Opens a session lazily, and opens a new one
- * when the server has expired it. Knows nothing about MongoDB - {@link SourceData} does.
+ * Minimal MCP client over the Streamable HTTP transport (JSON or SSE responses). Opens a session lazily, and opens a
+ * new one when the server has expired it; a stateless server (no session id) is supported too. Knows nothing about
+ * Neo4j - {@link GraphMcpSource} does.
  */
 @Slf4j
 @Component
@@ -35,8 +36,8 @@ public class McpClient {
     private volatile String sessionId;
     private volatile JsonNode serverInfo;
 
-    public McpClient(ObjectMapper mapper, @Value("${aipb.source.mcp-url}") String url,
-                     @Value("${aipb.source.timeout-seconds:20}") int timeoutSeconds) {
+    public McpClient(ObjectMapper mapper, @Value("${aipb.graph.mcp-url}") String url,
+                     @Value("${aipb.graph.mcp-timeout-seconds:20}") int timeoutSeconds) {
         this.mapper = mapper;
         this.url = URI.create(url);
         this.timeout = Duration.ofSeconds(timeoutSeconds);
@@ -96,8 +97,8 @@ public class McpClient {
         params.set("clientInfo", mapper.createObjectNode().put("name", "aipb-backend").put("version", "1.0.0"));
         HttpResponse<String> res = post(null, rpc(ids.incrementAndGet(), "initialize", params));
         JsonNode result = unwrap(res);
-        String sid = res.headers().firstValue("mcp-session-id")
-                .orElseThrow(() -> new SourceException("MCP server did not return a session id"));
+        // a stateless server opens no session: requests then carry no session id
+        String sid = res.headers().firstValue("mcp-session-id").orElse("");
         post(sid, mapper.createObjectNode().put("jsonrpc", "2.0").put("method", "notifications/initialized"));
         serverInfo = result.path("serverInfo");
         sessionId = sid;
@@ -123,7 +124,8 @@ public class McpClient {
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()));
-        if (sid != null) b.header("Mcp-Session-Id", sid).header("MCP-Protocol-Version", PROTOCOL_VERSION);
+        if (sid != null) b.header("MCP-Protocol-Version", PROTOCOL_VERSION);
+        if (sid != null && !sid.isEmpty()) b.header("Mcp-Session-Id", sid);
         try {
             return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {

@@ -14,8 +14,9 @@ import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /**
- * Answers semantic queries: plans them ({@link QueryPlanner}), compiles each source query ({@link PipelineCompiler}),
- * runs it through the {@link SourceReader} (on a page, the driver - not MCP), and assembles the {@link ResultSet}:
+ * Answers semantic queries: plans them ({@link QueryPlanner}), compiles each source query to Cypher
+ * ({@link CypherCompiler}), runs it through the {@link SourceReader} (on a page, the driver - not MCP), and assembles
+ * the {@link ResultSet}:
  * <ol>
  *   <li>merges the source rows on their dimension values (a comparison query's periods are moved forward by its
  *       shift, so last year's March lines up with this year's);</li>
@@ -57,10 +58,10 @@ public class QueryExecutor {
         List<JsonNode> results = new ArrayList<>();
         boolean truncated = false;
         for (QueryPlanner.PhysicalQuery pq : plan.queries()) {
-            ArrayNode pipeline = PipelineCompiler.compile(pq);
-            SourceReader.Result r = source.aggregate(pq.model().collection(), pipeline);
+            CypherCompiler.CompiledQuery cq = CypherCompiler.compile(pq);
+            SourceReader.Result r = source.cypher(cq.cypher(), cq.params());
             truncated |= r.truncated();
-            executed.add(new ResultSet.Executed(pq.purpose(), pq.model().id(), pq.model().collection(), pipeline, r.count(), r.truncated()));
+            executed.add(new ResultSet.Executed(pq.purpose(), pq.model().id(), pq.model().node(), cq.toJson(), r.count(), r.truncated()));
             results.add(r.documents());
         }
         String asOf = ctx.asOf().atStartOfDay().toInstant(ZoneOffset.UTC).toString();

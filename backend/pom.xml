@@ -18,8 +18,10 @@
 
   <properties>
     <java.version>21</java.version>
-    <!-- Tests tagged "live" (golden set: running stack) and "eval" (assistant evaluation: running stack + Claude, costs money) never run by default; run them with: mvn test -Dgroups=live -Dsurefire.excludedGroups= (or -Dgroups=eval) -->
+    <!-- Tests tagged "live" (golden set: running stack), "eval" (assistant evaluation: running stack + Claude, costs money) and "capture" (writes the graph parity fixtures from a MongoDB stack) never run by default; run them with: mvn test -Dgroups=live -Dsurefire.excludedGroups= (or -Dgroups=eval) -->
     <surefire.excludedGroups>live,eval,capture</surefire.excludedGroups>
+    <!-- the bank graph's driver; pinned rather than Spring Boot's managed 5.2x -->
+    <neo4j-java-driver.version>5.28.5</neo4j-java-driver.version>
   </properties>
 
   <dependencies>
@@ -38,6 +40,12 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <!-- reads the bank graph (com.aipb.source.GraphSource); Neo4j itself is not a Spring Data repository here -->
+      <groupId>org.neo4j.driver</groupId>
+      <artifactId>neo4j-java-driver</artifactId>
+      <version>${neo4j-java-driver.version}</version>
     </dependency>
     <dependency>
       <!-- the official Claude SDK, used by the widget assistant (com.aipb.assistant.llm.AnthropicGateway) -->

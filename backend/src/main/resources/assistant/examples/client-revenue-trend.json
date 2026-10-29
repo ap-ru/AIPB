@@ -7,7 +7,7 @@
     {
       "name": "clientId",
       "type": "string",
-      "description": "Client key (clients.clientId), e.g. CL-0001"
+      "description": "Client key (Client.clientId), e.g. CL-0001"
     },
     {
       "name": "asOfDate",
@@ -16,112 +16,23 @@
     }
   ],
   "data": {
-    "collection": "revenue_monthly",
-    "pipeline": [
-      {
-        "$match": {
-          "clientId": {
-            "$param": "clientId"
-          },
-          "$expr": {
-            "$and": [
-              {
-                "$gte": [
-                  "$month",
-                  {
-                    "$dateSubtract": {
-                      "startDate": {
-                        "$dateTrunc": {
-                          "date": {
-                            "$param": "asOfDate"
-                          },
-                          "unit": "quarter"
-                        }
-                      },
-                      "unit": "quarter",
-                      "amount": 8
-                    }
-                  }
-                ]
-              },
-              {
-                "$lt": [
-                  "$month",
-                  {
-                    "$dateTrunc": {
-                      "date": {
-                        "$param": "asOfDate"
-                      },
-                      "unit": "quarter"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
+    "custom": {
+      "cypher": "WITH datetime.truncate('quarter', datetime($asOfDate)) AS thisQuarter\nMATCH (r:RevenueMonth)-[:FOR_CLIENT]->(:Client {clientId: $clientId})\nWHERE r.month >= thisQuarter - duration({months: 24}) AND r.month < thisQuarter\nWITH datetime.truncate('quarter', r.month) AS q, sum(r.totalUsd) AS revenueUsd\nRETURN toString(q.year) + ' Q' + toString(q.quarter) AS quarter, revenueUsd\nORDER BY q",
+      "columns": [
+        {
+          "name": "quarter",
+          "type": "string",
+          "label": "Quarter"
+        },
+        {
+          "name": "revenueUsd",
+          "type": "number",
+          "unit": "USD",
+          "format": "currency",
+          "label": "Revenue"
         }
-      },
-      {
-        "$group": {
-          "_id": {
-            "$dateTrunc": {
-              "date": "$month",
-              "unit": "quarter"
-            }
-          },
-          "revenueUsd": {
-            "$sum": "$totalUsd"
-          }
-        }
-      },
-      {
-        "$sort": {
-          "_id": 1
-        }
-      },
-      {
-        "$project": {
-          "_id": 0,
-          "revenueUsd": 1,
-          "quarter": {
-            "$concat": [
-              {
-                "$toString": {
-                  "$year": "$_id"
-                }
-              },
-              " Q",
-              {
-                "$toString": {
-                  "$ceil": {
-                    "$divide": [
-                      {
-                        "$month": "$_id"
-                      },
-                      3
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-        }
-      }
-    ],
-    "columns": [
-      {
-        "name": "quarter",
-        "type": "string",
-        "label": "Quarter"
-      },
-      {
-        "name": "revenueUsd",
-        "type": "number",
-        "unit": "USD",
-        "format": "currency",
-        "label": "Revenue"
-      }
-    ]
+      ]
+    }
   },
   "view": {
     "primitive": "bar",

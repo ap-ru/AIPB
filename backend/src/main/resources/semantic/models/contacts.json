@@ -3,8 +3,9 @@
   "label": "Contacts",
   "version": 1,
   "description": "People at each client that the coverage team deals with.",
-  "collection": "contacts",
+  "node": "Contact",
   "entity": "clientId",
+  "entityJoin": { "rel": "WORKS_AT", "dir": "out" },
   "time": null,
   "dates": { "lastContact": "lastContactDate" },
   "dimensions": {

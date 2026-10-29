@@ -3,12 +3,13 @@
   "label": "Covenants",
   "version": 1,
   "description": "Financial covenants on credit facilities, with the result of the latest quarterly test.",
-  "collection": "covenants",
+  "node": "Covenant",
   "entity": "clientId",
+  "entityJoin": { "rel": "FOR_CLIENT", "dir": "out" },
   "time": null,
   "dates": { "tested": "lastTestDate" },
   "joins": {
-    "holding": { "collection": "holdings", "localField": "holdingId", "foreignField": "holdingId" }
+    "holding": { "rel": "HAS_COVENANT", "dir": "in", "node": "Holding" }
   },
   "dimensions": {
     "covenantName": "name",

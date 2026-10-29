@@ -8,7 +8,7 @@ import { Loading, ErrorBox } from '../components/common.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Icon from '../components/Icon.jsx';
 
-// CM&A workspace · Pre-call Brief: one static brief per client, read from the source collections (see PrecallController).
+// CM&A workspace · Pre-call Brief: one static brief per client, read from the bank graph (see PrecallController).
 
 const DAY = 864e5;
 const SERIES = ['#008555', '#1b5e8c', '#d93d00', '#b86e00', '#5b4b8a', '#0f8a3c'];
@@ -576,27 +576,27 @@ function Coverage({ d, ttmRevenue, open }) {
 function SourceRegister({ d }) {
   const as = day(d.asOfDate);
   const rows = [
-    ['Top KPIs, product holdings, cross-LOB', 'holdings', d.holdings.length, `Current as of ${as}`],
-    ['Relationship overview', 'clients · opportunities · signals', 1 + d.opportunities.length + d.signals.length, `As of ${as}`],
-    ['Company profile', 'precall_company_profiles', d.profile ? 1 : 0, d.profile?.sourceWorkbook || '–'],
-    ['Ownership', 'precall_ownership', d.ownership.length, d.ownership[0] ? `Snapshot ${day(d.ownership[0].asOfDate)}` : '–'],
-    ['Contacts and decision makers', 'contacts · precall_company_contacts', d.contacts.length + d.sourceContacts.length, 'CRM and source workbook'],
-    ['Upcoming meetings', 'precall_upcoming_meetings', d.meetings.length, 'Next 45 days'],
-    ['Logged activity', 'activities', d.activities.length, 'Last 180 days'],
-    ['Call history', 'precall_company_event_history', d.events.length, 'Source workbook'],
-    ['Loan and deposit balances', 'precall_balance_history', d.balanceHistory.length, '24 months to today'],
-    ['Largest incoming and outgoing', 'precall_payment_flows', d.payments.length, 'Last 30 days'],
-    ['Credit rating changes', 'precall_company_risk_rating_history', d.ratings.length, 'Last 6 quarters'],
-    ['Financial KPIs, revenue and leverage', 'precall_company_financial_kpis', d.financialKpis.length, d.financialKpis[0]?.source || '–'],
-    ['Capital structure', 'holdings · covenants · precall_company_financial_kpis' + (d.bondDeal ? ' · hy_capital_structure' : ''), d.covenants.length + d.bondCapitalStructure.length, 'Latest statements'],
-    ['Relationship KPIs', 'precall_citizens_relationship_kpis', d.relationshipKpis.length, 'Monthly, 24 months'],
-    ['Revenue by product category', 'revenue_monthly', d.revenue.length, 'Closed months'],
-    ['Industry context', 'precall_industry_context · clients', 1 + d.peers.length, d.industry ? day(d.industry.asOfDate) : '–'],
-    ['Coverage team', 'precall_citizens_coverage', d.coverage.length, 'Source workbook'],
+    ['Top KPIs, product holdings, cross-LOB', 'Holding', d.holdings.length, `Current as of ${as}`],
+    ['Relationship overview', 'Client · Opportunity · Signal', 1 + d.opportunities.length + d.signals.length, `As of ${as}`],
+    ['Company profile', 'CompanyProfile', d.profile ? 1 : 0, d.profile?.sourceWorkbook || '–'],
+    ['Ownership', 'OwnershipStake', d.ownership.length, d.ownership[0] ? `Snapshot ${day(d.ownership[0].asOfDate)}` : '–'],
+    ['Contacts and decision makers', 'Contact · CompanyContact', d.contacts.length + d.sourceContacts.length, 'CRM and source workbook'],
+    ['Upcoming meetings', 'Meeting', d.meetings.length, 'Next 45 days'],
+    ['Logged activity', 'Activity', d.activities.length, 'Last 180 days'],
+    ['Call history', 'CompanyEvent', d.events.length, 'Source workbook'],
+    ['Loan and deposit balances', 'BalanceSnapshot', d.balanceHistory.length, '24 months to today'],
+    ['Largest incoming and outgoing', 'PaymentFlow', d.payments.length, 'Last 30 days'],
+    ['Credit rating changes', 'RiskRating', d.ratings.length, 'Last 6 quarters'],
+    ['Financial KPIs, revenue and leverage', 'FinancialKpi', d.financialKpis.length, d.financialKpis[0]?.source || '–'],
+    ['Capital structure', 'Holding · Covenant · FinancialKpi' + (d.bondDeal ? ' · HyCapitalLayer' : ''), d.covenants.length + d.bondCapitalStructure.length, 'Latest statements'],
+    ['Relationship KPIs', 'RelationshipKpi', d.relationshipKpis.length, 'Monthly, 24 months'],
+    ['Revenue by product category', 'RevenueMonth', d.revenue.length, 'Closed months'],
+    ['Industry context', 'IndustryContext · Client', 1 + d.peers.length, d.industry ? day(d.industry.asOfDate) : '–'],
+    ['Coverage team', 'CoverageBanker', d.coverage.length, 'Source workbook'],
   ].map(([section, src, n, period], i) => ({ _id: i, section, src, n, period }));
   return (
     <Section title="Source register" sub={`Data as of ${as} · synthetic seed data`} wide>
-      <Table cols={[['Section', (r) => r.section], ['Collection(s)', (r) => <code>{r.src}</code>], ['Rows', (r) => r.n, true], ['Period / source', (r) => r.period]]} rows={rows} />
+      <Table cols={[['Section', (r) => r.section], ['Label(s)', (r) => <code>{r.src}</code>], ['Rows', (r) => r.n, true], ['Period / source', (r) => r.period]]} rows={rows} />
     </Section>
   );
 }

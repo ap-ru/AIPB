@@ -21,7 +21,7 @@ export function PlatformProvider({ children }) {
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState(null);
-  // The source-data connections (MongoDB read directly for pages; the MCP server for the assistant): GET /api/source/status.
+  // The source-data connections (the bank graph read directly for pages; the Cypher MCP server for the assistant): GET /api/source/status.
   const [source, setSource] = useState(null);
   // Widget types, their config schemas and the query datasets (GET /api/widgets/manifest).
   const [manifest, setManifest] = useState(null);

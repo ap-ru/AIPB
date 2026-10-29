@@ -12,7 +12,7 @@ import java.util.Map;
 
 /**
  * The CM&A workspace's New Issue page: the deal calendar per product tab and one deal's transaction details, read
- * straight from the hy_* source collections. A static page - no widgets, no assistant.
+ * straight from the bank graph's high-yield labels (HyDeal, HyTranche, ...). A static page - no widgets, no assistant.
  */
 @RestController
 @RequestMapping("/api/new-issue")
@@ -24,7 +24,7 @@ public class NewIssueController {
     /** Every deal in a product tab (High Yield only has data so far), in market first, then newest priced. */
     @GetMapping("/deals")
     public Map<String, Object> deals(@RequestParam(defaultValue = "High Yield") String market) {
-        JsonNode deals = source.find("hy_deals", Map.of("market", market), null, sort(), null).documents();
+        JsonNode deals = source.find("HyDeal", Map.of("market", market), null, sort(), null).documents();
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("market", market);
         m.put("asOfDate", source.asOfDate());
@@ -35,17 +35,17 @@ public class NewIssueController {
     /** One deal with its issuer, tranches and the transaction-detail sections. */
     @GetMapping("/deals/{dealId}")
     public Map<String, Object> deal(@PathVariable String dealId) {
-        JsonNode deal = source.find("hy_deals", Map.of("_id", dealId), null, null, 1).documents();
+        JsonNode deal = source.find("HyDeal", Map.of("_id", dealId), null, null, 1).documents();
         if (deal.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no deal " + dealId);
         Map<String, Object> byDeal = Map.of("dealId", dealId);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("deal", deal.get(0));
-        m.put("issuer", first(source.find("hy_issuers", Map.of("_id", deal.get(0).path("issuerId").asText()), null, null, 1).documents()));
-        m.put("tranches", source.find("hy_tranches", byDeal, null, Map.of("_id", 1), null).documents());
-        m.put("capitalStructure", source.find("hy_capital_structure", byDeal, null, Map.of("rank", 1), null).documents());
-        m.put("covenants", source.find("hy_covenants", byDeal, null, Map.of("_id", 1), null).documents());
-        m.put("allocations", source.find("hy_allocations", byDeal, null, Map.of("_id", 1), null).documents());
-        m.put("fees", first(source.find("hy_fee_economics", Map.of("_id", dealId), null, null, 1).documents()));
+        m.put("issuer", first(source.find("HyIssuer", Map.of("_id", deal.get(0).path("issuerId").asText()), null, null, 1).documents()));
+        m.put("tranches", source.find("HyTranche", byDeal, null, Map.of("_id", 1), null).documents());
+        m.put("capitalStructure", source.find("HyCapitalLayer", byDeal, null, Map.of("rank", 1), null).documents());
+        m.put("covenants", source.find("HyCovenant", byDeal, null, Map.of("_id", 1), null).documents());
+        m.put("allocations", source.find("HyAllocation", byDeal, null, Map.of("_id", 1), null).documents());
+        m.put("fees", first(source.find("HyFeeEconomics", Map.of("_id", dealId), null, null, 1).documents()));
         return m;
     }
 

@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * A Skills Studio template (resources/skills/templates/*.json): what the Studio shows, and what guides (stage guidance,
- * worked examples, brief defaults) and constrains (scope, primitives, collections, rows) one assistant run. Templates
+ * worked examples, brief defaults) and constrains (scope, primitives, labels, rows) one assistant run. Templates
  * are written by developers, versioned in git and checked at startup by {@link SkillTemplateRegistry}.
  */
 public record SkillTemplate(String id, int version, String kind, String title, String summary, String icon, String category,
@@ -33,19 +33,19 @@ public record SkillTemplate(String id, int version, String kind, String title, S
     }
 
     /** What the run may produce. An empty list or null means unconstrained. */
-    public record Constraints(List<String> primitives, List<String> collections, List<String> handlers, String scope,
+    public record Constraints(List<String> primitives, List<String> labels, List<String> handlers, String scope,
                               Boolean requireReview, Integer maxRows) {
         static final Constraints NONE = new Constraints(null, null, null, null, null, null);
 
         public Constraints {
             primitives = primitives == null ? List.of() : List.copyOf(primitives);
-            collections = collections == null ? List.of() : List.copyOf(collections);
+            labels = labels == null ? List.of() : List.copyOf(labels);
             handlers = handlers == null ? List.of() : List.copyOf(handlers);
         }
 
         @JsonIgnore
         public boolean isEmpty() {
-            return primitives.isEmpty() && collections.isEmpty() && handlers.isEmpty() && scope == null
+            return primitives.isEmpty() && labels.isEmpty() && handlers.isEmpty() && scope == null
                     && !Boolean.TRUE.equals(requireReview) && maxRows == null;
         }
     }

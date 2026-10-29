@@ -1,35 +1,34 @@
 package com.aipb.semantic;
 
-import com.aipb.source.SourceData;
+import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiFunction;
 
-import static com.aipb.semantic.PipelineCompilerTest.*;
+import static com.aipb.semantic.CypherCompilerTest.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Assembling results from canned source rows: merging, comparisons, filled periods, derived metrics, records. */
 class QueryExecutorTest {
 
-    /** A source that answers each aggregate with whatever the responder returns for (collection, pipeline). */
-    static final class FakeSource extends SourceData {
+    /** A source that answers each query with whatever the responder returns for (label, "cypher params"). */
+    static final class FakeSource implements SourceReader {
         final List<String> calls = new ArrayList<>();
-        private final BiFunction<String, ArrayNode, String> responder;
+        private final BiFunction<String, String, String> responder;
 
-        FakeSource(BiFunction<String, ArrayNode, String> responder) {
-            super(null, "bank");
-            this.responder = responder;
-        }
+        FakeSource(BiFunction<String, String, String> responder) { this.responder = responder; }
 
         @Override
-        public Result aggregate(String collection, ArrayNode pipeline) {
-            calls.add(collection + " " + pipeline);
+        public Result cypher(String query, Map<String, Object> params) {
+            String label = query.replaceFirst("(?s)^MATCH \\(n:([A-Za-z_]+)\\).*", "$1");
+            String text = query + " " + params;
+            calls.add(label + " " + text);
             try {
-                JsonNode docs = MAPPER.readTree(responder.apply(collection, pipeline));
+                JsonNode docs = MAPPER.readTree(responder.apply(label, text));
                 return new Result(docs, docs.size(), docs.size(), List.of());
             } catch (Exception e) {
                 throw new IllegalStateException(e);
@@ -37,10 +36,18 @@ class QueryExecutorTest {
         }
 
         @Override
+        public Result find(String label, Map<String, Object> filter, List<String> fields, Map<String, Object> sort, Integer limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String database() { return "neo4j"; }
+
+        @Override
         public String asOfDate() { return "2026-10-16T00:00:00Z"; }
     }
 
-    private ResultSet run(String query, String entity, BiFunction<String, ArrayNode, String> responder) {
+    private ResultSet run(String query, String entity, BiFunction<String, String, String> responder) {
         return new QueryExecutor(SM, new FakeSource(responder)).execute(q(query), entity);
     }
 
@@ -86,7 +93,7 @@ class QueryExecutorTest {
 
     @Test
     void crossModelMetricsMergeOnTheSameRows() {
-        ResultSet r = run("{\"metrics\": [\"shareOfWallet\"], \"dimensions\": [\"client\"]}", null, (c, p) -> c.equals("clients")
+        ResultSet r = run("{\"metrics\": [\"shareOfWallet\"], \"dimensions\": [\"client\"]}", null, (c, p) -> c.equals("Client")
                 ? "[{\"client\": \"CL-1\", \"clientName\": \"One\", \"m0\": 1000}, {\"client\": \"CL-2\", \"clientName\": \"Two\", \"m0\": 400}]"
                 : "[{\"client\": \"CL-1\", \"clientName\": \"One\", \"m0\": 100}, {\"client\": \"CL-2\", \"clientName\": \"Two\", \"m0\": 200}]");
         assertThat(r.rows()).hasSize(2);

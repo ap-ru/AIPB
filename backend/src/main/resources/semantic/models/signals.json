@@ -3,8 +3,9 @@
   "label": "Signals",
   "version": 1,
   "description": "Risk, opportunity, service and market signals detected about clients, with their triage stage.",
-  "collection": "signals",
+  "node": "Signal",
   "entity": "clientId",
+  "entityJoin": { "rel": "ABOUT", "dir": "out" },
   "time": { "field": "detectedAt", "grain": "month", "closedOnly": false },
   "dimensions": {
     "signalCategory": "category",
@@ -36,7 +37,7 @@
     "fields": [
       { "id": "title", "label": "Signal", "field": "title", "type": "string" },
       { "id": "subtitle", "label": "Category · type · stage", "type": "string",
-        "expr": { "$concat": ["$category", " · ", "$type", " · ", "$stage"] }, "sources": ["signals.category", "signals.type", "signals.stage"] },
+        "expr": "n.category + ' · ' + n.type + ' · ' + n.stage", "sources": ["Signal.category", "Signal.type", "Signal.stage"] },
       { "id": "clientName", "label": "Client", "field": "client.name", "type": "string" },
       { "id": "category", "label": "Category", "field": "category", "type": "string", "dimension": "signalCategory" },
       { "id": "type", "label": "Type", "field": "type", "type": "string" },

@@ -1,9 +1,6 @@
 package com.aipb.widget;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.aipb.source.ReadOnlyCypher;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -11,67 +8,79 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Fills a custom spec's parameters into its pipeline. A parameter is referenced as the object {"$param": "name"} and is
- * replaced by a single JSON value - never spliced into text - so a value can't change the query's structure. Dates
- * become Extended JSON {"$date": ...}, so they compare as BSON dates (a plain string date would silently match nothing).
+ * Binds a custom spec's parameters for its Cypher query. A parameter is referenced as {@code $name} and passed to the
+ * driver as a parameter value - never spliced into the text - so a value can't change the query's structure. Every
+ * {@code $name} the query uses must be declared; values are type-checked. Dates are passed as ISO instants (text), so
+ * the query compares with {@code datetime($asOfDate)}: the same on the driver and through the MCP server.
  */
 public final class ParamBinder {
 
-    public static final String PARAM_KEY = "$param";
     public static final String AS_OF_DATE = "asOfDate";
-    private static final JsonNodeFactory F = JsonNodeFactory.instance;
+    /** {@code $name} outside strings and comments ({@code $`name`} included). */
+    private static final Pattern REF = Pattern.compile("\\$`?([A-Za-z_][A-Za-z0-9_]*)`?");
 
     private ParamBinder() {}
 
-    /** The bound pipeline, and the value each parameter resolved to (as given, after type checks). */
-    public record Bound(JsonNode pipeline, Map<String, String> values) {}
+    /** The driver parameters, and the value each parameter resolved to (as given, after type checks). */
+    public record Bound(Map<String, Object> params, Map<String, String> values) {}
 
     /**
      * Resolves every declared parameter from {@code given} (asOfDate falls back to {@code asOfDate}), type-checks it
-     * and substitutes it. Throws IllegalArgumentException naming what is missing or malformed.
+     * and checks the query uses only declared ones. Throws IllegalArgumentException naming what is missing or malformed.
      */
     public static Bound bind(WidgetSpec spec, Map<String, String> given, Supplier<String> asOfDate) {
-        Map<String, JsonNode> nodes = new LinkedHashMap<>();
+        Map<String, Object> params = new LinkedHashMap<>();
         Map<String, String> values = new LinkedHashMap<>();
         List<String> missing = new ArrayList<>();
         for (WidgetSpec.Param p : spec.paramsOrEmpty()) {
             String raw = given == null ? null : given.get(p.name());
             if ((raw == null || raw.isBlank()) && AS_OF_DATE.equals(p.name())) raw = asOfDate.get();
             if (raw == null || raw.isBlank()) { missing.add(p.name()); continue; }
-            nodes.put(p.name(), convert(p, raw.trim()));
+            params.put(p.name(), convert(p, raw.trim()));
             values.put(p.name(), raw.trim());
         }
+        // asOfDate is built in: a query may use it without declaring it
+        Set<String> used = referenced(spec.custom().cypher());
+        if (used.contains(AS_OF_DATE) && !params.containsKey(AS_OF_DATE)) params.put(AS_OF_DATE, isoDate(AS_OF_DATE, asOfDate.get()));
         if (!missing.isEmpty())
             throw new IllegalArgumentException("missing parameter" + (missing.size() > 1 ? "s " : " ") + String.join(", ", missing)
                     + " - widget '" + spec.id() + "' needs " + describe(spec));
-        return new Bound(substitute(spec.custom().pipeline(), nodes), values);
+        for (String u : used)
+            if (!params.containsKey(u))
+                throw new IllegalArgumentException("the query uses $" + u + " but '" + u + "' is not declared in params");
+        return new Bound(params, values);
     }
 
-    /** Names referenced as {"$param": name} anywhere in a pipeline. */
-    public static Set<String> referenced(JsonNode node) {
+    /** Names referenced as {@code $name} in a Cypher query (not inside strings or comments). */
+    public static Set<String> referenced(String cypher) {
         Set<String> out = new LinkedHashSet<>();
-        collect(node, out);
+        if (cypher == null) return out;
+        Matcher m = REF.matcher(ReadOnlyCypher.code(cypher));
+        while (m.find()) out.add(m.group(1));
         return out;
     }
 
-    static JsonNode convert(WidgetSpec.Param p, String raw) {
+    static Object convert(WidgetSpec.Param p, String raw) {
         switch (p.type()) {
             case "date" -> {
-                return F.objectNode().put("$date", isoDate(p.name(), raw));
+                return isoDate(p.name(), raw);
             }
             case "number" -> {
                 try {
-                    return F.numberNode(new BigDecimal(raw));
-                } catch (NumberFormatException e) {
+                    BigDecimal d = new BigDecimal(raw);
+                    return d.scale() <= 0 && d.abs().compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) < 0 ? (Object) d.longValueExact() : (Object) d.doubleValue();
+                } catch (NumberFormatException | ArithmeticException e) {
                     throw new IllegalArgumentException("parameter " + p.name() + " must be a number, got '" + raw + "'");
                 }
             }
             default -> {
                 if (raw.length() > 200 || raw.chars().anyMatch(Character::isISOControl))
                     throw new IllegalArgumentException("parameter " + p.name() + " must be a short single-line string");
-                return F.textNode(raw);
+                return raw;
             }
         }
     }
@@ -84,37 +93,6 @@ public final class ParamBinder {
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("parameter " + name + " must be a date (YYYY-MM-DD or ISO instant), got '" + raw + "'");
         }
-    }
-
-    private static JsonNode substitute(JsonNode node, Map<String, JsonNode> values) {
-        if (node == null) return F.nullNode();
-        if (isParamRef(node)) {
-            String name = node.get(PARAM_KEY).asText();
-            JsonNode v = values.get(name);
-            if (v == null) throw new IllegalArgumentException("pipeline uses {\"$param\": \"" + name + "\"} but '" + name + "' is not declared in params");
-            return v.deepCopy();
-        }
-        if (node.isArray()) {
-            ArrayNode out = F.arrayNode();
-            node.forEach(n -> out.add(substitute(n, values)));
-            return out;
-        }
-        if (node.isObject()) {
-            ObjectNode out = F.objectNode();
-            node.fields().forEachRemaining(e -> out.set(e.getKey(), substitute(e.getValue(), values)));
-            return out;
-        }
-        return node;
-    }
-
-    private static void collect(JsonNode node, Set<String> out) {
-        if (node == null) return;
-        if (isParamRef(node)) { out.add(node.get(PARAM_KEY).asText()); return; }
-        if (node.isContainerNode()) node.forEach(n -> collect(n, out));
-    }
-
-    private static boolean isParamRef(JsonNode node) {
-        return node.isObject() && node.size() == 1 && node.has(PARAM_KEY) && node.get(PARAM_KEY).isTextual();
     }
 
     private static String describe(WidgetSpec spec) {

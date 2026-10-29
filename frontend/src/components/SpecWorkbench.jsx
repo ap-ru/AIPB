@@ -9,21 +9,19 @@ function template(page) {
   const client = page?.params?.some((p) => p.name === 'clientId');
   return JSON.stringify({
     id: client ? 'client-signals-by-category' : 'book-signals-by-category',
+    specVersion: 2,
     title: 'Active signals by category',
     description: client ? 'Unresolved signals for the selected client, counted by category.' : 'Unresolved signals across the book, counted by category.',
     params: client ? [{ name: 'clientId', type: 'string', description: 'Client key, e.g. CL-0001' }] : [],
     data: {
-      collection: 'signals',
-      pipeline: [
-        { $match: client ? { clientId: { $param: 'clientId' }, stage: { $ne: 'Resolved' } } : { stage: { $ne: 'Resolved' } } },
-        { $group: { _id: '$category', signals: { $sum: 1 } } },
-        { $sort: { signals: -1 } },
-        { $project: { _id: 0, category: '$_id', signals: 1 } },
-      ],
-      columns: [
-        { name: 'category', type: 'string', label: 'Category' },
-        { name: 'signals', type: 'number', unit: 'count', format: 'integer', label: 'Active signals' },
-      ],
+      custom: {
+        cypher: (client ? 'MATCH (s:Signal)-[:ABOUT]->(:Client {clientId: $clientId})\n' : 'MATCH (s:Signal)\n')
+          + "WHERE s.stage <> 'Resolved'\nRETURN s.category AS category, count(*) AS signals\nORDER BY signals DESC",
+        columns: [
+          { name: 'category', type: 'string', label: 'Category' },
+          { name: 'signals', type: 'number', unit: 'count', format: 'integer', label: 'Active signals' },
+        ],
+      },
     },
     view: { primitive: 'bar', x: 'category', y: ['signals'], orientation: 'horizontal' },
     layout: { span: 6 },
@@ -105,7 +103,7 @@ export default function SpecWorkbench({ page, pageParams, onPlace }) {
     <div className="spec-workbench">
       <div className="stack" style={{ gap: 8 }}>
         <div className="muted" style={{ fontSize: 12 }}>
-          A widget is a spec: a read-only pipeline over one source collection, its columns, and one primitive to show them.
+          A widget is a spec: a semantic query, or a read-only Cypher query over the bank graph (values as $parameters, today as datetime($asOfDate)), its columns, and one primitive to show them.
           {pageParams && Object.keys(pageParams).length > 0 && <> Sample values from this page: <span className="mono">{JSON.stringify(pageParams)}</span>.</>}
         </div>
         <textarea className="mono spec-editor" spellCheck={false} value={text} onChange={(e) => { setText(e.target.value); setReport(null); }} />

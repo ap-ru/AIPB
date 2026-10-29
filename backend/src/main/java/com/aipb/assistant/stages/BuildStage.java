@@ -17,9 +17,9 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Stage 2 - get the right numbers. Objective: a read-only pipeline returning exactly the brief's figures, with
+ * Stage 2 - get the right numbers. Objective: a read-only Cypher query returning exactly the brief's figures, with
  * declared columns. Process: ground each measure in the data dictionary, confirm assumptions with
- * sample_documents / distinct_values, test with run_query, then submit_data. Sees: the primer, its rules, the data
+ * sample_nodes / distinct_values / graph_schema, test with run_query, then submit_data. Sees: the primer, its rules, the data
  * overview and full dictionary, three worked examples (or the template's), the template's guidance (static); the page,
  * the data's today and the brief - plus, on a revision, the previous data and the change asked for, or a review's
  * findings (dynamic). Gate: the template's source and row limits ({@link TemplateGate}), then {@link BuildGate}.
@@ -43,7 +43,7 @@ public class BuildStage {
         String user = userContext(brief, revision, ctx);
         rec.context(context.manifest(system, user), user);
         Handler handler = new Handler(brief, ctx, template);
-        runner.toolLoop("build", system, tools.definitions("distinct_values", "run_query", "sample_documents", "submit_data"),
+        runner.toolLoop("build", system, tools.definitions("distinct_values", "graph_schema", "run_query", "sample_nodes", "submit_data"),
                 user, "submit_data", handler, rec, deadline, events);
         return handler.artifact;
     }
@@ -94,7 +94,8 @@ public class BuildStage {
             JsonNode in = use.input() == null ? JsonNodeFactory.instance.objectNode() : use.input();
             return switch (use.name()) {
                 case "run_query" -> tools.runQuery(in, ctx);
-                case "sample_documents" -> tools.sampleDocuments(in, ctx);
+                case "sample_nodes" -> tools.sampleNodes(in, ctx);
+                case "graph_schema" -> tools.graphSchema(in, ctx);
                 case "distinct_values" -> tools.distinctValues(in, ctx);
                 case "submit_data" -> {
                     List<String> errors = template == null ? List.of() : templateGate.build(in, template);

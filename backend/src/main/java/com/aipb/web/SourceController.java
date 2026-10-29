@@ -1,8 +1,8 @@
 package com.aipb.web;
 
-import com.aipb.source.DirectSource;
+import com.aipb.source.GraphMcpSource;
+import com.aipb.source.GraphSource;
 import com.aipb.source.McpClient;
-import com.aipb.source.SourceData;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,15 +14,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** The source-data connections: MongoDB read directly (what pages show), and the MCP server (what the assistant uses). */
+/** The source-data connections: the bank graph read directly (what pages show), and the MCP server (what the assistant uses). */
 @RestController
 @RequestMapping("/api/source")
 @RequiredArgsConstructor
 public class SourceController {
 
-    private final DirectSource direct;
+    private final GraphSource graph;
     private final McpClient mcp;
-    private final SourceData source;
+    private final GraphMcpSource source;
 
     /**
      * Whether each connection works, and what it sees. {@code connected} is the direct one, since pages depend on it.
@@ -31,13 +31,17 @@ public class SourceController {
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("database", direct.database());
+        m.put("kind", "neo4j");
+        m.put("database", graph.database());
         try {
-            JsonNode meta = direct.find("_meta", null, null, null, 1).documents();
+            JsonNode meta = graph.meta();
             m.put("connected", true);
-            m.put("collections", direct.collections());
-            m.put("catalogEntries", direct.find("_catalog", null, Map.of("_id", 1), null, null).count());
-            if (!meta.isEmpty()) m.put("asOfDate", meta.get(0).path("asOfDate").asText());
+            m.put("labels", graph.labels());
+            m.put("catalogEntries", graph.dictionary().entries().size());
+            if (meta != null) {
+                m.put("asOfDate", meta.path("asOfDate").asText());
+                m.put("counts", meta.path("counts"));
+            }
         } catch (RuntimeException e) {
             m.put("connected", false);
             m.put("error", String.valueOf(e.getMessage()));

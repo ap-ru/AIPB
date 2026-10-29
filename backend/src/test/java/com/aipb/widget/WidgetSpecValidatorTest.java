@@ -2,7 +2,7 @@ package com.aipb.widget;
 
 import com.aipb.model.Layout;
 import com.aipb.service.LayoutService;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
 import com.aipb.source.SourceReader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,14 +24,14 @@ import static org.mockito.Mockito.*;
 class WidgetSpecValidatorTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private SourceData source;
+    private GraphMcpSource source;
     private WidgetSpecValidator validator;
     private Layout layout;
 
     @BeforeEach
     void setUp() {
-        source = mock(SourceData.class);
-        when(source.collectionsCached()).thenReturn(List.of("_catalog", "clients", "covenants", "revenue_monthly"));
+        source = mock(GraphMcpSource.class);
+        when(source.labelsCached()).thenReturn(List.of("Client", "Covenant", "RevenueMonth"));
         when(source.asOfDate()).thenReturn("2026-10-16T00:00:00.000Z");
         LayoutService layouts = mock(LayoutService.class);
         layout = new Layout();
@@ -55,19 +55,19 @@ class WidgetSpecValidatorTest {
     /** A valid client-scoped table spec; tests break one thing at a time. */
     private ObjectNode spec() throws Exception {
         return (ObjectNode) mapper.readTree("""
-                {"id":"client-covenants","title":"Covenants","description":"Covenants of the client.",
+                {"id":"client-covenants","specVersion":2,"title":"Covenants","description":"Covenants of the client.",
                  "params":[{"name":"clientId","type":"string"}],
-                 "data":{"collection":"covenants",
-                   "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$project":{"_id":0,"name":1,"headroomPct":1,"lastTestDate":1}}],
+                 "data":{"custom":{
+                   "cypher":"MATCH (c:Covenant)-[:FOR_CLIENT]->(:Client {clientId: $clientId}) RETURN c.name AS name, c.headroomPct AS headroomPct, c.lastTestDate AS lastTestDate",
                    "columns":[{"name":"name","type":"string","label":"Covenant"},
                               {"name":"headroomPct","type":"number","unit":"percent","format":"percentPoints","label":"Headroom"},
-                              {"name":"lastTestDate","type":"date","unit":"date","format":"date","label":"Tested"}]},
+                              {"name":"lastTestDate","type":"date","unit":"date","format":"date","label":"Tested"}]}},
                  "view":{"primitive":"table","columns":["name","headroomPct","lastTestDate"]}}""");
     }
 
     private void returns(String rowsJson, String... limits) throws Exception {
         JsonNode rows = mapper.readTree(rowsJson);
-        when(source.aggregate(anyString(), any(ArrayNode.class)))
+        when(source.cypher(anyString(), any()))
                 .thenReturn(new SourceReader.Result(rows, rows.size(), rows.size(), List.of(limits)));
     }
 
@@ -84,9 +84,9 @@ class WidgetSpecValidatorTest {
         assertThat(r.ok()).as(r.errors().toString()).isTrue();
         assertThat(r.preview().count()).isEqualTo(2);
         assertThat(r.preview().rows().get(0).get("headroomPct").asDouble()).isEqualTo(22.5);
-        ArgumentCaptor<ArrayNode> sent = ArgumentCaptor.forClass(ArrayNode.class);
-        verify(source).aggregate(eq("covenants"), sent.capture());
-        assertThat(sent.getValue().at("/0/$match/clientId").asText()).isEqualTo("CL-0001");
+        @SuppressWarnings("unchecked") ArgumentCaptor<Map<String, Object>> sent = ArgumentCaptor.forClass(Map.class);
+        verify(source).cypher(startsWith("MATCH (c:Covenant)"), sent.capture());
+        assertThat(sent.getValue()).containsEntry("clientId", "CL-0001");
     }
 
     @Test
@@ -95,13 +95,13 @@ class WidgetSpecValidatorTest {
         s.remove("view");
         ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
         assertThat(errors(r)).containsOnly("schema");
-        verify(source, never()).aggregate(anyString(), any(ArrayNode.class));
+        verify(source, never()).cypher(anyString(), any());
     }
 
     @Test
     void unitAndFormatMustAgree() throws Exception {
         ObjectNode s = spec();
-        ((ObjectNode) s.at("/data/columns/1")).put("format", "percent");
+        ((ObjectNode) s.at("/data/custom/columns/1")).put("format", "percent");
         ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
         assertThat(errors(r)).contains("unit_format");
         assertThat(r.errors().get(0).message()).contains("percentPoints");
@@ -110,7 +110,7 @@ class WidgetSpecValidatorTest {
     @Test
     void ratioFormatOnZeroToHundredValuesIsCaughtLive() throws Exception {
         ObjectNode s = spec();
-        ((ObjectNode) s.at("/data/columns/1")).put("unit", "ratio").put("format", "percent");
+        ((ObjectNode) s.at("/data/custom/columns/1")).put("unit", "ratio").put("format", "percent");
         returns(GOOD_ROWS);
         ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
         assertThat(errors(r)).contains("unit_scale");
@@ -119,11 +119,21 @@ class WidgetSpecValidatorTest {
     @Test
     void parametersMustBeDeclaredAndTheWallClockIsRefused() throws Exception {
         ObjectNode s = spec();
-        ((ObjectNode) s.at("/data/pipeline/0/$match")).set("month", mapper.readTree("{\"$gte\":{\"$param\":\"from\"}}"));
-        ((ArrayNode) s.at("/data/pipeline")).add(mapper.readTree("{\"$addFields\":{\"now\":\"$$NOW\"}}"));
-        ((ArrayNode) s.at("/data/pipeline")).add(mapper.readTree("{\"$out\":\"x\"}"));
+        ((ObjectNode) s.at("/data/custom")).put("cypher", "MATCH (c:Covenant)-[:FOR_CLIENT]->(:Client {clientId: $clientId}) "
+                + "WHERE c.lastTestDate >= datetime($from) AND c.lastTestDate < datetime() SET c.seen = true "
+                + "RETURN c.name AS name, c.headroomPct AS headroomPct, c.lastTestDate AS lastTestDate");
         ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
-        assertThat(errors(r)).contains("params", "wall_clock", "write_stage");
+        assertThat(errors(r)).contains("params", "wall_clock", "read_only");
+        assertThat(r.errors()).anyMatch(e -> e.message().contains("datetime($asOfDate)"));
+    }
+
+    @Test
+    void labelsMustExistAndBeData() throws Exception {
+        ObjectNode s = spec();
+        ((ObjectNode) s.at("/data/custom")).put("cypher", "MATCH (c:Covenants) MATCH (m:_Meta) RETURN c.name AS name, c.headroomPct AS headroomPct, m.asOfDate AS lastTestDate");
+        ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
+        assertThat(r.errors()).anyMatch(e -> e.code().equals("labels") && e.message().contains("no label 'Covenants'"))
+                .anyMatch(e -> e.code().equals("labels") && e.message().contains("metadata"));
     }
 
     @Test
@@ -150,7 +160,7 @@ class WidgetSpecValidatorTest {
         s.set("view", mapper.readTree("{\"primitive\":\"meter\",\"value\":\"headroomPct\"}"));
         assertThat(validator.validate(s, "default", null, Map.of("clientId", "CL-0001")).errors())
                 .extracting(ValidationReport.Issue::path).contains("view.reference");
-        ((ArrayNode) s.at("/data/columns")).add(mapper.readTree("{\"name\":\"limitUsd\",\"type\":\"number\",\"unit\":\"USD\",\"format\":\"currency\",\"label\":\"Limit\"}"));
+        ((ArrayNode) s.at("/data/custom/columns")).add(mapper.readTree("{\"name\":\"limitUsd\",\"type\":\"number\",\"unit\":\"USD\",\"format\":\"currency\",\"label\":\"Limit\"}"));
         s.set("view", mapper.readTree("{\"primitive\":\"meter\",\"value\":\"headroomPct\",\"reference\":\"limitUsd\"}"));
         assertThat(validator.validate(s, "default", null, Map.of("clientId", "CL-0001")).errors())
                 .extracting(ValidationReport.Issue::message).anyMatch(m -> m.contains("same scale"));
@@ -174,7 +184,7 @@ class WidgetSpecValidatorTest {
         s.set("view", mapper.readTree("{\"primitive\":\"composition\",\"x\":\"name\",\"y\":[\"headroomPct\"]}"));
         assertThat(validator.validate(s, "default", null, Map.of("clientId", "CL-0001")).errors())
                 .extracting(ValidationReport.Issue::path).contains("view.y");
-        ((ObjectNode) s.at("/data/columns/1")).put("unit", "count").put("format", "integer");
+        ((ObjectNode) s.at("/data/custom/columns/1")).put("unit", "count").put("format", "integer");
         returns("[{\"name\":\"a\",\"headroomPct\":3,\"lastTestDate\":\"2026-09-30T00:00:00.000Z\"},"
                 + "{\"name\":\"b\",\"headroomPct\":-1,\"lastTestDate\":\"2026-09-30T00:00:00.000Z\"}]");
         assertThat(errors(validator.validate(s, "default", null, Map.of("clientId", "CL-0001")))).containsExactly("negative_part");
@@ -194,7 +204,7 @@ class WidgetSpecValidatorTest {
         returns("[]");
         ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
         assertThat(errors(r)).containsExactly("empty");
-        assertThat(r.errors().get(0).message()).contains("plain string");
+        assertThat(r.errors().get(0).message()).contains("datetime($asOfDate)");
     }
 
     @Test
@@ -216,16 +226,16 @@ class WidgetSpecValidatorTest {
         returns(GOOD_ROWS);
         ValidationReport r = validator.validate(s, "default", null, Map.of("clientId", "CL-0001"));
         assertThat(errors(r)).containsExactly("rows");
-        assertThat(r.errors().get(0).message()).contains("_id: null");
+        assertThat(r.errors().get(0).message()).contains("no grouping key");
     }
 
     @Test
     void sampleValuesComeFromThePageWhenNotGiven() throws Exception {
         Layout.PageParam p = layout.page("client").param("clientId");
-        p.setCollection("clients");
+        p.setCollection("clients");  // stored before the graph: read as the Client label
         p.setValueField("clientId");
         p.setLabelField("name");
-        when(source.find(eq("clients"), any(), any(), any(), any()))
+        when(source.find(eq("Client"), any(), any(), any(), any()))
                 .thenReturn(new SourceReader.Result(mapper.readTree("[{\"clientId\":\"CL-0007\",\"name\":\"Acme\"}]"), 1, 1, List.of()));
         returns(GOOD_ROWS);
         ValidationReport r = validator.validate(spec(), "default", "client", null);
@@ -236,12 +246,12 @@ class WidgetSpecValidatorTest {
     // ------------------------------------------------------------------ narrative (insights)
     private ObjectNode insight(String statements) throws Exception {
         return (ObjectNode) mapper.readTree("""
-                {"id":"revenue-momentum","title":"Revenue momentum","description":"Revenue over the last 12 closed months.",
+                {"id":"revenue-momentum","specVersion":2,"title":"Revenue momentum","description":"Revenue over the last 12 closed months.",
                  "params":[{"name":"clientId","type":"string"}],
-                 "data":{"collection":"revenue_monthly",
-                   "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$group":{"_id":null,"revenueT12mUsd":{"$sum":"$totalUsd"}}}],
+                 "data":{"custom":{
+                   "cypher":"MATCH (r:RevenueMonth) WHERE r.clientId = $clientId RETURN sum(r.totalUsd) AS revenueT12mUsd, 0.0 AS revenueYoY",
                    "columns":[{"name":"revenueT12mUsd","type":"number","unit":"USD","format":"currency","label":"Revenue (T12M)"},
-                              {"name":"revenueYoY","type":"number","unit":"ratio","format":"percent","label":"Change"}]},
+                              {"name":"revenueYoY","type":"number","unit":"ratio","format":"percent","label":"Change"}]}},
                  "view":{"primitive":"narrative","figures":["revenueT12mUsd"],"statements":%s}}""".formatted(statements));
     }
 

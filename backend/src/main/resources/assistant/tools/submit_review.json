@@ -1,7 +1,7 @@
 {
   "name": "submit_review",
   "strict": true,
-  "description": "Submit your review verdict. Call it after you have checked the pipeline against the brief and the data dictionary and recomputed at least one key figure a different way with run_query.",
+  "description": "Submit your review verdict. Call it after you have checked the query against the brief and the data dictionary and recomputed at least one key figure a different way with run_query.",
   "input_schema": {
     "type": "object",
     "additionalProperties": false,

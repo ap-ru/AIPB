@@ -11,7 +11,7 @@ import com.aipb.service.LayoutService;
 import com.aipb.skills.InsightSkill;
 import com.aipb.skills.SkillTemplateRegistry;
 import com.aipb.skills.WidgetSkill;
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphMcpSource;
 import com.aipb.source.SourceReader;
 import com.aipb.identity.Actor;
 import com.aipb.identity.Role;
@@ -47,7 +47,7 @@ class AssistantOrchestratorTest {
         else if (data instanceof JsonNode n && n.has("kind")) detail = n.get("kind").asText();
         events.add(event + ":" + detail);
     };
-    private SourceData source;
+    private GraphMcpSource source;
     private WidgetSpecValidator validator;
     private WidgetDefinitionRepository definitions;
     private WidgetLibrary library;
@@ -62,10 +62,10 @@ class AssistantOrchestratorTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        source = mock(SourceData.class);
+        source = mock(GraphMcpSource.class);
         when(source.catalog()).thenReturn(mapper.readTree(Path.of("../data/catalog.json").toFile()));
         when(source.asOfDate()).thenReturn("2026-10-16T00:00:00.000Z");
-        when(source.aggregate(anyString(), any(ArrayNode.class))).thenReturn(result("[{\"quarter\":\"2026 Q3\",\"revenueUsd\":2700000}]"));
+        when(source.cypher(anyString(), any())).thenReturn(result("[{\"quarter\":\"2026 Q3\",\"revenueUsd\":2700000}]"));
         LayoutService layouts = mock(LayoutService.class);
         when(layouts.get(anyString())).thenReturn(Defaults.defaultLayout());
         definitions = mock(WidgetDefinitionRepository.class);
@@ -106,14 +106,14 @@ class AssistantOrchestratorTest {
                "time":{"window":"last 8 closed quarters","grain":"quarter"},"filters":[],"sort":"oldest first","limit":null,
                "display":"any","assumptions":["Last 8 closed quarters"]}}""";
     static final String RUN_QUERY = """
-            {"collection":"revenue_monthly","params":[{"name":"clientId","type":"string"}],
-             "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$group":{"_id":null,"revenueUsd":{"$sum":"$totalUsd"}}}]}""";
+            {"params":[{"name":"clientId","type":"string"}],
+             "cypher":"MATCH (r:RevenueMonth) WHERE r.clientId = $clientId RETURN sum(r.totalUsd) AS revenueUsd"}""";
     static final String SUBMIT = """
-            {"collection":"revenue_monthly","params":[{"name":"clientId","type":"string"},{"name":"asOfDate","type":"date"}],
-             "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$project":{"_id":0,"quarter":1,"revenueUsd":1}}],
+            {"params":[{"name":"clientId","type":"string"},{"name":"asOfDate","type":"date"}],
+             "cypher":"MATCH (r:RevenueMonth) WHERE r.clientId = $clientId AND r.month < datetime($asOfDate) RETURN r.quarter AS quarter, sum(r.totalUsd) AS revenueUsd",
              "columns":[{"name":"quarter","type":"string","unit":"none","format":"text","label":"Quarter"},
                         {"name":"revenueUsd","type":"number","unit":"USD","format":"currency","label":"Revenue"}],
-             "measures":[{"column":"revenueUsd","definition":"Sum of totalUsd per quarter","catalogReference":"revenue_monthly.totalUsd"}],
+             "measures":[{"column":"revenueUsd","definition":"Sum of totalUsd per quarter","catalogReference":"RevenueMonth.totalUsd"}],
              "expectedShape":"8 rows, one per quarter","emptyIsExpected":false,"assumptions":["Quarters are calendar quarters"]}""";
     static final String DESIGN = """
             {"title":"Quarterly revenue","description":"Revenue for the selected client over the last 8 closed quarters.","primitive":"bar",
@@ -142,7 +142,7 @@ class AssistantOrchestratorTest {
         assertThat(p.path("kind").asText()).isEqualTo("new");
         assertThat(p.path("title").asText()).isEqualTo("Quarterly revenue");
         assertThat(p.path("spec").path("view").path("primitive").asText()).isEqualTo("bar");
-        assertThat(p.path("whatItShows").get(0).path("source").asText()).isEqualTo("revenue_monthly.totalUsd");
+        assertThat(p.path("whatItShows").get(0).path("source").asText()).isEqualTo("RevenueMonth.totalUsd");
         assertThat(p.path("assumptions").toString()).contains("Last 8 closed quarters").contains("calendar quarters");
         assertThat(p.path("review").path("state").asText()).isEqualTo("none");
         // the gate's rejection went back to Claude as an error tool result, and the conversation stayed append-only
@@ -370,12 +370,12 @@ class AssistantOrchestratorTest {
     }
 
     static final String MOMENTUM_SUBMIT = """
-            {"collection":"revenue_monthly","params":[{"name":"clientId","type":"string"},{"name":"asOfDate","type":"date"}],
-             "pipeline":[{"$match":{"clientId":{"$param":"clientId"}}},{"$group":{"_id":null,"revenueT12mUsd":{"$sum":"$totalUsd"}}}],
+            {"params":[{"name":"clientId","type":"string"},{"name":"asOfDate","type":"date"}],
+             "cypher":"MATCH (r:RevenueMonth) WHERE r.clientId = $clientId AND r.month < datetime($asOfDate) RETURN sum(r.totalUsd) AS revenueT12mUsd, 0.0 AS revenueYoY",
              "columns":[{"name":"revenueT12mUsd","type":"number","unit":"USD","format":"currency","label":"Revenue (T12M)"},
                         {"name":"revenueYoY","type":"number","unit":"ratio","format":"percent","label":"Change on prior year"}],
-             "measures":[{"column":"revenueT12mUsd","definition":"Sum of totalUsd over 12 closed months","catalogReference":"revenue_monthly.totalUsd"},
-                         {"column":"revenueYoY","definition":"Change on the prior 12 months","catalogReference":"revenue_monthly.totalUsd"}],
+             "measures":[{"column":"revenueT12mUsd","definition":"Sum of totalUsd over 12 closed months","catalogReference":"RevenueMonth.totalUsd"},
+                         {"column":"revenueYoY","definition":"Change on the prior 12 months","catalogReference":"RevenueMonth.totalUsd"}],
              "expectedShape":"1 row","emptyIsExpected":false,"assumptions":[]}""";
     static final String NARRATIVE = """
             {"title":"Revenue momentum","description":"Revenue over the last 12 closed months for the selected client, against the 12 before.",
@@ -421,7 +421,7 @@ class AssistantOrchestratorTest {
 
     @Test
     void aTemplatesConstraintsGoBackToClaudeAsCorrections() {
-        String holdings = SUBMIT.replace("revenue_monthly.totalUsd", "holdings.drawnUsd").replace("\"collection\":\"revenue_monthly\"", "\"collection\":\"holdings\"");
+        String holdings = SUBMIT.replace("RevenueMonth.totalUsd", "Holding.drawnUsd").replace("(r:RevenueMonth)", "(r:Holding)");
         claude.on("intake", FakeGateway.json(BRIEF.replace("\"display\":\"any\"", "\"display\":\"line\"")), FakeGateway.json(BRIEF))
               .on("build", FakeGateway.tool("submit_data", SUBMIT), FakeGateway.tool("submit_data", holdings))
               .on("present", FakeGateway.json(DESIGN.replace("\"primitive\":\"bar\"", "\"primitive\":\"table\"")), FakeGateway.json(DESIGN));
@@ -435,7 +435,7 @@ class AssistantOrchestratorTest {
         assertThat(intakeFix).contains("draws meter / bar / metric only");
         LlmMessage.ToolResult buildFix = (LlmMessage.ToolResult) ((LlmMessage.User) claude.requests.get(3).messages().get(2)).blocks().get(0);
         assertThat(buildFix.isError()).isTrue();
-        assertThat(buildFix.content()).contains("reads holdings only");
+        assertThat(buildFix.content()).contains("reads Holding");
         String presentFix = ((LlmMessage.Text) ((LlmMessage.User) claude.requests.get(5).messages().get(2)).blocks().get(0)).text();
         assertThat(presentFix).contains("not table");
         assertThat(read(store.get(id).getBrief()).path("display").asText()).isEqualTo("meter"); // the template's default
@@ -596,7 +596,7 @@ class AssistantOrchestratorTest {
         assertThat(p.path("modifies").asText()).isEqualTo("client-revenue-by-lob");
         JsonNode data = p.path("spec").path("data");
         assertThat(data.path("query").path("dimensions").get(0).asText()).isEqualTo("lob");
-        assertThat(data.has("pipeline")).isFalse();
+        assertThat(data.has("custom")).isFalse();
         assertThat(data.path("columns").toString()).contains("\"label\":\"LOB\"").doesNotContain("currency");
 
         when(workflow.submit(any(), eq(BUILDER))).thenReturn(submission("sub-2", "client-revenue-by-lob", WidgetSubmission.PENDING, null));
@@ -680,7 +680,7 @@ class AssistantOrchestratorTest {
     }
 
     private ValidationReport failing(String code, String message) {
-        return new ValidationReport(false, List.of(new ValidationReport.Issue(code, "data.pipeline", message)), List.of(), Map.of(), null);
+        return new ValidationReport(false, List.of(new ValidationReport.Issue(code, "data.custom.cypher", message)), List.of(), Map.of(), null);
     }
 
     private SourceReader.Result result(String rows) {
@@ -689,7 +689,7 @@ class AssistantOrchestratorTest {
     }
 
     private WidgetSpec spec() {
-        return SpecMigrator.read(mapper, readUnchecked("{\"id\":\"x\",\"title\":\"x\",\"description\":\"x\",\"data\":{\"collection\":\"c\",\"pipeline\":[{}],\"columns\":[]},\"view\":{\"primitive\":\"bar\",\"x\":\"q\",\"y\":[\"v\"]}}"));
+        return SpecMigrator.read(mapper, readUnchecked("{\"id\":\"x\",\"specVersion\":2,\"title\":\"x\",\"description\":\"x\",\"data\":{\"custom\":{\"cypher\":\"MATCH (n:X) RETURN n\",\"columns\":[]}},\"view\":{\"primitive\":\"bar\",\"x\":\"q\",\"y\":[\"v\"]}}"));
     }
 
     private JsonNode read(String json) { return readUnchecked(json); }

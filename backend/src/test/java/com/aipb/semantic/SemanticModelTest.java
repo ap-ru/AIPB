@@ -44,8 +44,8 @@ class SemanticModelTest {
     void catalogCheckCatchesRenamedFieldsAndValues() throws Exception {
         JsonNode catalog = mapper.readTree(Files.readString(Path.of("../data/catalog.json")));
         for (JsonNode e : catalog) {
-            if (e.path("_id").asText().equals("holdings")) {
-                for (JsonNode f : e.get("fields")) {
+            if (e.path("_id").asText().equals("Holding")) {
+                for (JsonNode f : e.get("properties")) {
                     if (f.path("name").asText().equals("drawnUsd")) ((com.fasterxml.jackson.databind.node.ObjectNode) f).put("name", "drawnAmountUsd");
                     if (f.path("name").asText().equals("productType"))
                         ((com.fasterxml.jackson.databind.node.ArrayNode) f.get("allowedValues")).remove(0); // drop "credit"
@@ -55,6 +55,34 @@ class SemanticModelTest {
         List<String> problems = SemanticModelValidator.againstCatalog(sm, catalog);
         assertThat(problems).anyMatch(p -> p.contains("measure exposureUsd") && p.contains("drawnUsd"));
         assertThat(problems).anyMatch(p -> p.contains("segment credit") && p.contains("'credit'"));
+    }
+
+    @Test
+    void catalogCheckCatchesJoinsTheGraphDoesNotHaveOrThatCouldMultiplyRows() throws Exception {
+        JsonNode catalog = mapper.readTree(Files.readString(Path.of("../data/catalog.json")));
+        assertThat(SemanticModelValidator.againstCatalog(sm, catalog)).isEmpty();
+        for (JsonNode e : catalog) {
+            if (e.path("_id").asText().equals("Covenant"))
+                e.get("relationships").forEach(r -> { if (r.path("type").asText().equals("HAS_COVENANT")) ((com.fasterxml.jackson.databind.node.ObjectNode) r).put("type", "COVERS"); });
+            if (e.path("_id").asText().equals("RevenueMonth"))
+                e.get("relationships").forEach(r -> { if (r.path("type").asText().equals("OF_PRODUCT")) ((com.fasterxml.jackson.databind.node.ObjectNode) r).put("cardinality", "one-to-many"); });
+        }
+        List<String> problems = SemanticModelValidator.againstCatalog(sm, catalog);
+        assertThat(problems).anyMatch(p -> p.contains("join holding") && p.contains("no relationship (:Holding)-[:HAS_COVENANT]->(:Covenant)"));
+        assertThat(problems).anyMatch(p -> p.contains("join product") && p.contains("could multiply rows"));
+    }
+
+    @Test
+    void anExpressionReadsOnlyWhatItDeclares() {
+        Model holdings = sm.model("holdings");
+        List<String> out = new java.util.ArrayList<>();
+        SemanticModelValidator.checkExpr(holdings, com.fasterxml.jackson.databind.node.TextNode.valueOf("coalesce(n.drawnUsd, n.secretUsd)"),
+                List.of("Holding.drawnUsd"), "x", out);
+        SemanticModelValidator.checkExpr(holdings, com.fasterxml.jackson.databind.node.TextNode.valueOf("n.drawnUsd + $p"), List.of("Holding.drawnUsd"), "y", out);
+        SemanticModelValidator.checkExpr(holdings, com.fasterxml.jackson.databind.node.TextNode.valueOf("m.drawnUsd"), List.of("Holding.drawnUsd"), "z", out);
+        assertThat(out).anyMatch(p -> p.startsWith("x") && p.contains("n.secretUsd"))
+                .anyMatch(p -> p.startsWith("y") && p.contains("parameters"))
+                .anyMatch(p -> p.startsWith("z") && p.contains("only the model's node n"));
     }
 
     @Test

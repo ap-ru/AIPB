@@ -1,0 +1,17 @@
+{
+  "name": "graph_schema",
+  "strict": false,
+  "description": "Return what the graph actually holds for one label: each stored property with its types and whether every node has it, and every relationship type to or from the label, with the label at the other end and how many there are. Call it when the data dictionary leaves you unsure which way a relationship points or whether a property is always present.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": "A label of the bank graph, e.g. Covenant."
+      }
+    },
+    "required": [
+      "label"
+    ]
+  }
+}

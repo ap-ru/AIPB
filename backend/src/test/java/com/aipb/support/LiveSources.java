@@ -1,29 +1,25 @@
 package com.aipb.support;
 
-import com.aipb.source.DirectSource;
+import com.aipb.source.GraphMcpSource;
+import com.aipb.source.GraphSource;
 import com.aipb.source.McpClient;
-import com.aipb.source.SourceData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * The running stack's two source connections, for live tests: the driver (what pages read through) and the MCP server.
- * The driver logs in as bank_reader: {@code -Daipb.source-uri=...}, or {@code BANK_READER_PASSWORD} from the environment.
+ * The driver logs in to Neo4j with {@code -Daipb.graph-password=...}, or {@code NEO4J_PASSWORD} from the environment.
  */
 public final class LiveSources {
 
     private LiveSources() {}
 
-    public static DirectSource direct(ObjectMapper mapper) {
-        String uri = System.getProperty("aipb.source-uri");
-        if (uri == null) {
-            String pw = System.getenv("BANK_READER_PASSWORD");
-            if (pw == null) throw new IllegalStateException("set -Daipb.source-uri or BANK_READER_PASSWORD to run live tests");
-            uri = "mongodb://bank_reader:" + pw + "@localhost:27017/bank?authSource=bank";
-        }
-        return new DirectSource(mapper, uri, "bank", 1000, 30_000);
+    public static GraphSource graph(ObjectMapper mapper) {
+        String pw = System.getProperty("aipb.graph-password", System.getenv("NEO4J_PASSWORD"));
+        if (pw == null) throw new IllegalStateException("set -Daipb.graph-password or NEO4J_PASSWORD to run live tests");
+        return new GraphSource(mapper, System.getProperty("aipb.graph-uri", "bolt://localhost:7687"), "neo4j", pw, "neo4j", 1000, 30_000);
     }
 
-    public static SourceData mcp(ObjectMapper mapper) {
-        return new SourceData(new McpClient(mapper, System.getProperty("aipb.mcp-url", "http://localhost:3001/mcp"), 30), "bank");
+    public static GraphMcpSource mcp(ObjectMapper mapper, GraphSource graph) {
+        return new GraphMcpSource(new McpClient(mapper, System.getProperty("aipb.mcp-url", "http://localhost:3001/mcp/"), 30), graph, mapper, "neo4j", 1000);
     }
 }

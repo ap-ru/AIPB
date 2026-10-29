@@ -13,12 +13,12 @@
   ],
   "guidance": {
     "intake": "This template builds a credit exposure widget for the selected client: the drawn balance against the committed limit of its credit facilities. Scope is always client. If the banker asks for something else (revenue, deposits, pipeline), decline and suggest the Custom widget template. A total is one figure with utilization; \"by facility\" is one row per credit holding, largest committed first.",
-    "build": "Exposure is drawnUsd and the limit is committedUsd, over holdings where productType is credit. Utilization is drawn / committed, guarded against a zero limit. Return exposureUsd, committedUsd and utilization (unit ratio) - per facility when the brief has a facility dimension.",
+    "build": "Exposure is drawnUsd and the limit is committedUsd, over the client's (:Holding) nodes where productType is credit. Utilization is drawn / committed, guarded against a zero limit. Return exposureUsd, committedUsd and utilization (unit ratio) - per facility when the brief has a facility dimension.",
     "present": "A total is a meter: value = utilization, reference = the committed limit, polarity lower-is-better, warnAt 0.85. By facility is a horizontal bar of drawn balance per facility, with committed as the comparison."
   },
   "constraints": {
     "primitives": ["meter", "bar", "metric"],
-    "collections": ["holdings"],
+    "labels": ["Holding"],
     "scope": "client",
     "maxRows": 25
   },

@@ -1,13 +1,13 @@
 {
   "name": "submit_data",
   "strict": false,
-  "description": "Submit the finished data definition for the widget. Call it once the pipeline has been tested with run_query and returns exactly the brief's figures. The submission is checked automatically (schema, parameters, units and formats, a live run with the sample parameters, catalog references); if anything fails you get the reasons back - fix them and submit again.",
+  "description": "Submit the finished data definition for the widget. Call it once the query has been tested with run_query and returns exactly the brief's figures. The submission is checked automatically (schema, parameters, units and formats, a live run with the sample parameters, catalog references); if anything fails you get the reasons back - fix them and submit again.",
   "input_schema": {
     "type": "object",
     "properties": {
       "params": {
         "type": "array",
-        "description": "The parameters the pipeline references as {\"$param\": \"name\"}. Declare asOfDate (type date) whenever the pipeline uses it.",
+        "description": "The parameters the query uses as $name, e.g. clientId (string). $asOfDate is built in: you may declare it (type date) or not.",
         "items": {
           "type": "object",
           "additionalProperties": false,
@@ -18,7 +18,7 @@
           "properties": {
             "name": {
               "type": "string",
-              "description": "clientId or asOfDate (or another page parameter)"
+              "description": "clientId (or another page parameter), or asOfDate"
             },
             "type": {
               "enum": [
@@ -31,20 +31,13 @@
           }
         }
       },
-      "collection": {
+      "cypher": {
         "type": "string",
-        "description": "A data collection of the bank database (see the data dictionary), e.g. holdings."
-      },
-      "pipeline": {
-        "type": "array",
-        "items": {
-          "type": "object"
-        },
-        "description": "MongoDB aggregation stages, read-only. Reference parameters as {\"$param\": \"clientId\"} / {\"$param\": \"asOfDate\"}; never literal client ids or dates."
+        "description": "A read-only Cypher query (MATCH ... RETURN; no CREATE, MERGE, SET, DELETE or CALL ... IN TRANSACTIONS). Use parameters for every value: $clientId for the selected client, $asOfDate for the data's today (ISO text: compare with datetime($asOfDate)). Never literal client ids or dates, never date() or datetime() with no argument. Each RETURN alias is a result column."
       },
       "columns": {
         "type": "array",
-        "description": "Every field each result row has, in display order.",
+        "description": "Every column each result row has (the RETURN aliases), in display order.",
         "items": {
           "type": "object",
           "additionalProperties": false,
@@ -118,11 +111,11 @@
             },
             "definition": {
               "type": "string",
-              "description": "Plain-language definition as computed by the pipeline."
+              "description": "Plain-language definition as computed by the query."
             },
             "catalogReference": {
               "type": "string",
-              "description": "collection.field or collection.derivedMetricName from the data dictionary that this figure is based on, e.g. holdings.drawnUsd or clients.utilization."
+              "description": "Label.property or Label.derivedMetricName from the data dictionary that this figure is based on, e.g. Holding.drawnUsd or Client.utilization."
             }
           }
         }
@@ -145,8 +138,7 @@
     },
     "required": [
       "params",
-      "collection",
-      "pipeline",
+      "cypher",
       "columns",
       "measures",
       "expectedShape",

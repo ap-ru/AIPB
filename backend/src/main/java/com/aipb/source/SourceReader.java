@@ -1,51 +1,58 @@
 package com.aipb.source;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * Reads the source database, pinned to it. Two implementations: {@link DirectSource} (the MongoDB driver, used whenever
- * a page shows data) and {@link SourceData} (the MCP server, used by the assistant while it explores the data). Both
- * return plain JSON (see {@link Ejson}) and mark a result cut short by a limit as {@code truncated}.
+ * Reads the bank graph (Neo4j), read-only. Two implementations: {@link GraphSource} (the Neo4j driver, used whenever a
+ * page shows data) and {@link GraphMcpSource} (the Cypher MCP server, used by the assistant while it explores the
+ * data). Both refuse anything but a read ({@link ReadOnlyCypher}), return plain JSON (see {@link GraphJson}) and mark a
+ * result cut short by the record cap as {@code truncated}.
  */
 public interface SourceReader {
 
-    Pattern COLLECTION = Pattern.compile("[A-Za-z_][A-Za-z0-9_.-]{0,119}");
+    Pattern LABEL = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,63}");
+    Pattern PROPERTY = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,63}");
+    /** The limit name reported when the record cap cuts a result short. */
+    String MAX_RECORDS = "maxRecordsPerQuery";
 
     /**
-     * Documents returned by a query. {@code total} is how many matched (null if unknown); {@code limits} names the
-     * limits that cut the result short, if any.
+     * Records returned by a query, as JSON objects (one per record, keyed by column). {@code total} is how many there
+     * were (null if unknown); {@code limits} names the limits that cut the result short, if any.
      */
     record Result(JsonNode documents, int count, Integer total, List<String> limits) {
         public boolean truncated() { return !limits.isEmpty(); }
     }
 
+    /** The Neo4j database the reader is pinned to. */
     String database();
 
-    /** Runs an aggregation pipeline on a source collection. Write stages are refused. */
-    Result aggregate(String collection, List<?> pipeline);
+    /** Runs a read-only Cypher query with parameters (values only: the query text is never assembled from them). */
+    Result cypher(String query, Map<String, Object> params);
 
     /**
-     * As {@link #aggregate(String, List)}, for a pipeline already in JSON form. Prefer this for stored specs: a JSON
-     * tree is sent as-is, nulls included (e.g. {"$group": {"_id": null}}), whereas Maps lose null values to the app's
-     * non-null JSON setting.
+     * Nodes of one label as property maps. {@code filter}: property to value (equality), or to {@code {"$in": [...]}},
+     * {@code {"$nin": [...]}} or {@code {"$ne": x}} (a missing property is "not equal", as in MongoDB); {@code fields}:
+     * the properties to return (null: all, and {@code _id} always); {@code sort}: property to 1 or -1, in order. Any
+     * argument but the label may be null.
      */
-    Result aggregate(String collection, ArrayNode pipeline);
+    Result find(String label, Map<String, Object> filter, List<String> fields, Map<String, Object> sort, Integer limit);
 
-    /** Finds documents in a source collection. Any argument but the collection may be null. */
-    Result find(String collection, Map<String, Object> filter, Map<String, Object> projection, Map<String, Object> sort, Integer limit);
-
-    /** The dataset's "today" (_meta.asOfDate) as an ISO instant. Every widget's time logic uses it. */
+    /** The dataset's "today" ((:_Meta).asOfDate) as an ISO instant. Every widget's time logic uses it. */
     String asOfDate();
 
-    /** The collection name, if it is a valid name outside {@code system.*}. */
-    static String collection(String name) {
-        if (name == null || !COLLECTION.matcher(name).matches() || name.startsWith("system."))
-            throw new IllegalArgumentException("invalid collection name '" + name + "'");
+    /** The label, if it is a valid label name. */
+    static String label(String name) {
+        if (name == null || !LABEL.matcher(name).matches()) throw new IllegalArgumentException("invalid label '" + name + "'");
+        return name;
+    }
+
+    /** The property name, if it is a valid property name. */
+    static String property(String name) {
+        if (name == null || !PROPERTY.matcher(name).matches()) throw new IllegalArgumentException("invalid property name '" + name + "'");
         return name;
     }
 }

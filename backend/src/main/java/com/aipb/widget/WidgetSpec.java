@@ -14,10 +14,12 @@ import java.util.Map;
  * <ul>
  *   <li>a semantic {@code query} - metrics, dimensions, a window - whose columns (type, unit, format, meaning) are
  *       derived from the semantic layer, with optional label / tone {@code columns} overrides; or</li>
- *   <li>{@code custom}: the reviewed escape hatch, a hand-written read-only pipeline over one collection and the
- *       columns it declares, with {@code params} it references as {"$param": name}.</li>
+ *   <li>{@code custom}: the reviewed escape hatch, a hand-written read-only Cypher query over the bank graph and the
+ *       columns it declares, with the {@code params} it references as {@code $name} (the built-in {@code $asOfDate}
+ *       included).</li>
  * </ul>
- * Always parse through {@link SpecMigrator#read}, which also accepts format 1 (data = collection + pipeline + columns).
+ * Always parse through {@link SpecMigrator#read}, which also accepts format 1. A custom spec written for MongoDB (a
+ * {@code collection} and {@code pipeline}, no {@code cypher}) cannot be translated: it reads as {@link Custom#needsRebuild()}.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -30,7 +32,7 @@ public record WidgetSpec(String id, Integer specVersion, Integer version, String
         return paramsOrEmpty().stream().filter(p -> p.name().equals(name)).findFirst().orElse(null);
     }
 
-    /** True when the data is a semantic query, false for a custom pipeline. */
+    /** True when the data is a semantic query, false for custom Cypher. */
     public boolean isQuery() { return data != null && data.query() != null; }
 
     public Custom custom() { return data == null ? null : data.custom(); }
@@ -45,12 +47,20 @@ public record WidgetSpec(String id, Integer specVersion, Integer version, String
         public List<Column> overridesOrEmpty() { return columns == null ? List.of() : columns; }
     }
 
-    /** A hand-written pipeline over one source collection, and the columns every result row has. */
+    /**
+     * A hand-written read-only Cypher query over the bank graph, and the columns every result row has.
+     * {@code collection} and {@code pipeline} are what a spec written for MongoDB held: kept, so it can be shown and
+     * rebuilt, but never run.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Custom(String collection, JsonNode pipeline, List<Column> columns) {
+    public record Custom(String cypher, List<Column> columns, String collection, JsonNode pipeline) {
         public Column column(String name) {
             return columns == null ? null : columns.stream().filter(c -> c.name().equals(name)).findFirst().orElse(null);
         }
+
+        /** Written for MongoDB (a pipeline, no Cypher): it has to be rebuilt for the graph before it can run. */
+        public boolean needsRebuild() { return cypher == null || cypher.isBlank(); }
     }
 
     /** A declared column (custom data), or an override of a derived one (query data: name plus label and/or tones). */

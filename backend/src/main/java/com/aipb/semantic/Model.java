@@ -7,21 +7,25 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The physical mapping of one source collection: which conformed dimensions it binds to which fields, its time field,
- * its named segments, its measures (aggregations of a field or expression) and the record fields it can list. A path
- * like {@code client.region} goes through a join named {@code client}; joins are always many-to-one (onto a primary
- * key), so they never multiply rows. Models are developer-authored; the rest of the app only refers to their ids.
+ * The physical mapping of one node label of the bank graph: which conformed dimensions it binds to which properties,
+ * its time property, its named segments, its measures (aggregations of a property or a Cypher expression over the
+ * node {@code n}) and the record fields it can list. A path like {@code client.region} goes through a join named
+ * {@code client} - a relationship to another label; joins are always many-to-one (each node has at most one at the
+ * other end), so they never multiply rows. Models are developer-authored; the rest of the app only refers to their ids.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Model(String id, String label, int version, String description, String collection, String entity,
-                    boolean entityModel, TimeSpec time, Map<String, String> dates, Map<String, Join> joins,
+public record Model(String id, String label, int version, String description, String node, String entity,
+                    boolean entityModel, Join entityJoin, TimeSpec time, Map<String, String> dates, Map<String, Join> joins,
                     Map<String, Binding> dimensions, Map<String, Segment> segments, List<Measure> measures, Records records) {
 
     /** The default date: windows filter on it, and month/quarter/year group by it. {@code closedOnly}: rows exist only for closed months. */
     public record TimeSpec(String field, String grain, boolean closedOnly) {}
 
-    /** A many-to-one lookup: {@code localField} of this collection onto the key {@code foreignField} of {@code collection}. */
-    public record Join(String collection, String localField, String foreignField) {}
+    /**
+     * A many-to-one hop: relationship {@code rel} from this model's node ({@code dir} out: {@code (n)-[:rel]->(x)}, in:
+     * {@code (n)<-[:rel]-(x)}) to a node labelled {@code node}. The entity join's {@code node} is the entity model's.
+     */
+    public record Join(String rel, String dir, String node) {}
 
     /** Where a dimension lives in this model: its value path, and for keyed dimensions the path of its label. */
     @JsonInclude(JsonInclude.Include.NON_NULL)

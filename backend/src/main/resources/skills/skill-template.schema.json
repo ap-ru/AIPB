@@ -45,7 +45,7 @@
       "additionalProperties": false,
       "properties": {
         "primitives": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "collections": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "labels": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "handlers": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "scope": { "enum": ["client", "book"] },
         "requireReview": { "type": "boolean" },

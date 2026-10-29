@@ -1,6 +1,6 @@
 package com.aipb.semantic;
 
-import com.aipb.source.SourceData;
+import com.aipb.source.GraphSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationRunner;
@@ -27,10 +27,10 @@ public class SemanticConfig {
     }
 
     @Bean
-    public ApplicationRunner semanticCatalogCheck(SemanticModel sm, SourceData source) {
+    public ApplicationRunner semanticCatalogCheck(SemanticModel sm, GraphSource source) {
         return args -> {
             try {
-                List<String> problems = SemanticModelValidator.againstCatalog(sm, source.catalog());
+                List<String> problems = SemanticModelValidator.againstCatalog(sm, source.dictionary().entries());
                 if (problems.isEmpty()) log.info("Semantic model matches the data dictionary");
                 else log.error("Semantic model disagrees with the data dictionary:\n- {}", String.join("\n- ", problems));
             } catch (RuntimeException e) {
