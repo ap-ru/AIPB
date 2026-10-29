@@ -19,7 +19,7 @@
   <properties>
     <java.version>21</java.version>
     <!-- Tests tagged "live" (golden set: running stack) and "eval" (assistant evaluation: running stack + Claude, costs money) never run by default; run them with: mvn test -Dgroups=live -Dsurefire.excludedGroups= (or -Dgroups=eval) -->
-    <surefire.excludedGroups>live,eval</surefire.excludedGroups>
+    <surefire.excludedGroups>live,eval,capture</surefire.excludedGroups>
   </properties>
 
   <dependencies>

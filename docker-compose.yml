@@ -1,6 +1,7 @@
 name: aipb
 
 services:
+  # App storage only (layouts, widget definitions, assistant sessions in `aipb`). The bank's source data is in Neo4j.
   mongo:
     image: mongo:7
     container_name: aipb-mongo
@@ -11,8 +12,6 @@ services:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env (see .env.example)}
       AIPB_APP_PASSWORD: ${AIPB_APP_PASSWORD:?set AIPB_APP_PASSWORD in .env (see .env.example)}
-      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD:?set BANK_WRITER_PASSWORD in .env (see .env.example)}
-      BANK_READER_PASSWORD: ${BANK_READER_PASSWORD:?set BANK_READER_PASSWORD in .env (see .env.example)}
     ports:
       - "127.0.0.1:27017:27017"
     volumes:
@@ -20,93 +19,91 @@ services:
       - ./mongo-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # Logs in as a created user, so it only passes once the init scripts are done and the real server is up.
-      test: ["CMD-SHELL", "mongosh --quiet \"mongodb://bank_reader:$${BANK_READER_PASSWORD}@localhost:27017/bank?authSource=bank\" --eval 'db.runCommand({ping:1}).ok' | grep -q 1"]
+      test: ["CMD-SHELL", "mongosh --quiet \"mongodb://aipb_app:$${AIPB_APP_PASSWORD}@localhost:27017/aipb?authSource=aipb\" --eval 'db.runCommand({ping:1}).ok' | grep -q 1"]
       interval: 5s
       timeout: 5s
       retries: 30
 
-  # One-shot: generates the synthetic `bank` source database (skips if it already exists; BANK_RESET=true regenerates).
-  bank-seed:
-    image: mongo:7
-    container_name: aipb-bank-seed
+  # One-shot: generates the synthetic bank data (data/build-bank.js: the same generators, pinned to BANK_AS_OF) and
+  # loads it with read-back checks (data/load-graph.js), through its own writable Neo4j on the graph's volume (see
+  # data/Dockerfile). Skips if the graph is loaded; to reload: docker compose stop neo4j, then BANK_RESET=true up.
+  graph-seed:
+    build: ./data
+    image: aipb-graph-seed:latest
+    container_name: aipb-graph-seed
     restart: "no"
     environment:
-      SEED_DIR: /seed
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env (see .env.example)}
+      BANK_AS_OF: ${BANK_AS_OF:-}
       BANK_RESET: ${BANK_RESET:-false}
-      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD}
+      # not NEO4J_*: in this image every NEO4J_* variable is read as a Neo4j setting
+      SEED_NEO4J_URI: bolt://localhost:7687
+      SEED_NEO4J_USER: neo4j
+      SEED_NEO4J_PASSWORD: ${NEO4J_PASSWORD}
     volumes:
-      - ./data:/seed:ro
-    command: ["sh", "-c", "exec mongosh \"mongodb://bank_writer:$${BANK_WRITER_PASSWORD}@mongo:27017/bank?authSource=bank\" --quiet /seed/generate.js"]
-    depends_on:
-      mongo:
-        condition: service_healthy
+      - neo4j-data:/data
 
-  # One-shot: adds the High Yield new-issue collections (hy_*) to `bank`; touches nothing else (HY_RESET=true regenerates).
-  hy-seed:
-    image: mongo:7
-    container_name: aipb-hy-seed
-    restart: "no"
-    environment:
-      SEED_DIR: /seed
-      HY_RESET: ${HY_RESET:-false}
-      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD}
-    volumes:
-      - ./data:/seed:ro
-    command: ["sh", "-c", "exec mongosh \"mongodb://bank_writer:$${BANK_WRITER_PASSWORD}@mongo:27017/bank?authSource=bank\" --quiet /seed/generate-hy.js"]
-    depends_on:
-      bank-seed:
-        condition: service_completed_successfully
-
-  # One-shot: adds the pre-call brief's extra collections (meetings, balance history, payments, ownership, industry
-  # context) to `bank`; touches nothing else (PRECALL_PLUS_RESET=true regenerates).
-  precall-plus-seed:
-    image: mongo:7
-    container_name: aipb-precall-plus-seed
-    restart: "no"
-    environment:
-      SEED_DIR: /seed
-      PRECALL_PLUS_RESET: ${PRECALL_PLUS_RESET:-false}
-      BANK_WRITER_PASSWORD: ${BANK_WRITER_PASSWORD}
-    volumes:
-      - ./data:/seed:ro
-    command: ["sh", "-c", "exec mongosh \"mongodb://bank_writer:$${BANK_WRITER_PASSWORD}@mongo:27017/bank?authSource=bank\" --quiet /seed/generate-precall-plus.js"]
-    depends_on:
-      bank-seed:
-        condition: service_completed_successfully
-
-  # MongoDB MCP server: read-only access to the `bank` source data for the assistant exploring data while it designs a
-  # widget, and for Claude Code via .mcp.json. Pages do not use it: the backend reads widget data with the driver.
-  mcp:
-    image: mongodb/mongodb-mcp-server:3.0.5
-    container_name: aipb-mcp
+  # The bank's source data as a property graph (Neo4j Community LTS), opened read-only: the database refuses every
+  # write, data or schema, whoever sends it. Community has no role-based access control (one admin account), so this
+  # setting is the lock; the backend and the MCP server also refuse writes before they reach it.
+  # Browser: http://localhost:7474
+  neo4j:
+    image: neo4j:5.26.32-community
+    container_name: aipb-neo4j
     restart: unless-stopped
     environment:
-      # bank_reader can only read `bank`: the database enforces the lock, not this server or our code.
-      MDB_MCP_CONNECTION_STRING: mongodb://bank_reader:${BANK_READER_PASSWORD}@mongo:27017/bank?authSource=bank
-      MDB_MCP_READ_ONLY: "true"
-      # The data source is pinned: no switching connections, no file exports, no calls to MongoDB's hosted services.
-      MDB_MCP_DISABLED_TOOLS: connect,disconnect,export,mongodb-logs,search-knowledge,list-knowledge-sources
-      # Widgets read whole (usually aggregated) result sets, so allow more than the default 100 documents per call.
-      MDB_MCP_MAX_DOCUMENTS_PER_QUERY: "1000"
-      MDB_MCP_MAX_TIME_M_S: "10000"
-      MDB_MCP_TRANSPORT: http
-      MDB_MCP_HTTP_HOST: 0.0.0.0
-      MDB_MCP_HTTP_PORT: "3000"
-      MDB_MCP_DANGEROUS_HOST_BINDING: "true" # required to listen beyond the container's loopback; the host port below is localhost-only
-      MDB_MCP_HTTP_RESPONSE_TYPE: json
-      MDB_MCP_MONITORING_SERVER_HOST: 0.0.0.0
-      MDB_MCP_MONITORING_SERVER_PORT: "3002"
-      MDB_MCP_LOGGERS: stderr,mcp
-      MDB_MCP_TELEMETRY: disabled
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_server_databases_read__only: neo4j
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512M
+      # every query is bounded, whoever sends it
+      NEO4J_db_transaction_timeout: 30s
+      # for the healthcheck (any NEO4J_* variable is read as a setting, so not that prefix)
+      HEALTHCHECK_PASSWORD: ${NEO4J_PASSWORD}
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${HEALTHCHECK_PASSWORD}\" 'RETURN 1' > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+    depends_on:
+      graph-seed:
+        condition: service_completed_successfully
+
+  # Neo4j Cypher MCP server: read-only Cypher over the bank graph, for the assistant exploring data while it designs a
+  # widget, and for Claude Code via .mcp.json. Pages do not use it: the backend reads widget data with the driver.
+  graph-mcp:
+    # mcp-neo4j-cypher 0.6.0, pinned by digest (the image is published only as :latest)
+    image: mcp/neo4j-cypher@sha256:b252997d16d37633a5a1b30e21ac0bf368b1c64e5895e4005313c84d77a05310
+    container_name: aipb-graph-mcp
+    restart: unless-stopped
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_DATABASE: neo4j
+      # no write tool, and the read tool refuses any query whose EXPLAIN plan writes data (it lets schema commands
+      # through; the read-only database refuses those)
+      NEO4J_READ_ONLY: "true"
+      NEO4J_READ_TIMEOUT: "10"
+      NEO4J_TRANSPORT: http
+      NEO4J_MCP_SERVER_HOST: 0.0.0.0
+      NEO4J_MCP_SERVER_PORT: "8000"
+      NEO4J_MCP_SERVER_PATH: /mcp/
+      NEO4J_MCP_SERVER_ALLOWED_HOSTS: localhost,127.0.0.1,graph-mcp
+    ports:
+      - "127.0.0.1:3001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2)"]
       interval: 5s
       timeout: 3s
       retries: 20
     depends_on:
-      mongo:
+      neo4j:
         condition: service_healthy
 
   backend:
@@ -119,10 +116,11 @@ services:
       AIPB_SEED: "true"
       AIPB_RESET: ${AIPB_RESET:-false}
       AIPB_CORS: http://localhost:3080,http://localhost:5173
-      # Pages read the source data directly, as bank_reader (read-only on `bank`); the assistant goes through MCP.
-      AIPB_SOURCE_URI: mongodb://bank_reader:${BANK_READER_PASSWORD}@mongo:27017/bank?authSource=bank
-      AIPB_SOURCE_DB: bank
-      AIPB_MCP_URL: http://mcp:3000/mcp
+      # Pages read the bank graph with the driver (read transactions only); the assistant goes through the MCP server.
+      AIPB_GRAPH_URI: bolt://neo4j:7687
+      AIPB_GRAPH_USER: neo4j
+      AIPB_GRAPH_PASSWORD: ${NEO4J_PASSWORD}
+      AIPB_MCP_URL: http://graph-mcp:8000/mcp/
       # The widget assistant: enabled when ANTHROPIC_API_KEY is set. Per-stage model and effort (low|medium|high|xhigh|max).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AIPB_MODEL_INTAKE: ${AIPB_MODEL_INTAKE:-claude-haiku-5-5}
@@ -138,10 +136,10 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-      mcp:
+      graph-mcp:
         condition: service_healthy
       # starter widget specs are validated against the bank data at startup
-      bank-seed:
+      graph-seed:
         condition: service_completed_successfully
 
   frontend:
@@ -156,3 +154,4 @@ services:
 
 volumes:
   mongo-data:
+  neo4j-data:

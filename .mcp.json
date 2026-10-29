@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "mongodb": {
+    "bank-graph": {
       "type": "http",
-      "url": "http://localhost:3001/mcp"
+      "url": "http://localhost:3001/mcp/"
     }
   }
 }

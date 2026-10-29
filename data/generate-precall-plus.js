@@ -278,10 +278,10 @@ check(all('precall_payment_flows').every((p) => p.paymentDate <= AS_OF && p.paym
 check(all('precall_upcoming_meetings').every((m) => m.meetingDate > AS_OF), 'precall_upcoming_meetings: a meeting is not in the future');
 
 COLLECTIONS.forEach((c) => {
-  const e = catalog.find((x) => x._id === c);
+  const e = catalog.find((x) => x.collection === c);
   check(!!e, `catalog-precall-plus: no entry for ${c}`);
   if (!e) return;
-  const documented = new Set(e.fields.map((f) => f.name));
+  const documented = new Set(e.properties.map((f) => f.name));
   const observed = new Set(bank.getCollection(c).aggregate([
     { $project: { kv: { $objectToArray: '$$ROOT' } } }, { $unwind: '$kv' }, { $group: { _id: '$kv.k' } },
   ]).toArray().map((d) => d._id));

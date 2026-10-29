@@ -1,0 +1,12 @@
+{
+  "name": "aipb-bank-data",
+  "private": true,
+  "description": "Generates the synthetic bank source data and loads it into Neo4j (build-bank.js, load-graph.js).",
+  "scripts": {
+    "build": "node build-bank.js",
+    "load": "node load-graph.js"
+  },
+  "dependencies": {
+    "neo4j-driver": "5.28.3"
+  }
+}

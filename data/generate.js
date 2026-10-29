@@ -2,8 +2,11 @@
 //
 //   mongosh "mongodb://localhost:27017/bank" data/generate.js          (or: docker compose run --rm bank-seed)
 //   BANK_RESET=true ...                                                regenerate even if data exists
+//   BANK_AS_OF=2026-10-27 ...                                          pin the data's "today" (default: the run day)
+//   node data/build-bank.js                                            the same data as data/bank.json, for the graph
 //
-// Every value is drawn from a seeded PRNG, so a run is reproducible; dates are relative to the run day (asOfDate in _meta).
+// Every value is drawn from a seeded PRNG, so a run is reproducible; dates are relative to asOfDate (BANK_AS_OF, or the
+// run day), so a pinned BANK_AS_OF gives identical data on any day.
 // Hidden per-client drivers (stress, growth) keep the story consistent across collections: a stressed client has tighter
 // covenants, higher utilization, more risk signals and a lower health score. The data dictionary lives in catalog.json
 // and is loaded into `_catalog`; the self-checks at the end fail the run if the data and the dictionary disagree.
@@ -47,7 +50,8 @@ const weighted = (pairs) => { let r = rand() * pairs.reduce((s, p) => s + p[1], 
 const pad = (n, w) => String(n).padStart(w, '0');
 
 const DAY = 864e5;
-const today = new Date();
+const today = process.env.BANK_AS_OF ? new Date(process.env.BANK_AS_OF + 'T00:00:00Z') : new Date();
+if (Number.isNaN(today.getTime())) throw new Error(`BANK_AS_OF must be YYYY-MM-DD, got '${process.env.BANK_AS_OF}'`);
 const AS_OF = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
 const daysFromAsOf = (n) => new Date(AS_OF.getTime() + n * DAY);
 const monthStart = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
@@ -899,15 +903,15 @@ check(all('precall_citizens_products').every((p) => p.creditLimit === null || p.
   'precall_citizens_products: availableBalance != creditLimit - totalBalance');
 
 // the dictionary must describe exactly the fields that exist
-catalog.filter((e) => COLLECTIONS.includes(e._id)).forEach((e) => {
-  const documented = new Set(e.fields.map((f) => f.name));
-  const observed = new Set(bank.getCollection(e._id).aggregate([
+catalog.filter((e) => COLLECTIONS.includes(e.collection)).forEach((e) => {
+  const documented = new Set(e.properties.map((f) => f.name));
+  const observed = new Set(bank.getCollection(e.collection).aggregate([
     { $project: { kv: { $objectToArray: '$$ROOT' } } }, { $unwind: '$kv' }, { $group: { _id: '$kv.k' } },
   ]).toArray().map((d) => d._id));
-  observed.forEach((f) => check(documented.has(f), `catalog: ${e._id}.${f} exists in the data but is not documented`));
-  documented.forEach((f) => check(observed.has(f), `catalog: ${e._id}.${f} is documented but never appears in the data`));
+  observed.forEach((f) => check(documented.has(f), `catalog: ${e.collection}.${f} exists in the data but is not documented`));
+  documented.forEach((f) => check(observed.has(f), `catalog: ${e.collection}.${f} is documented but never appears in the data`));
 });
-COLLECTIONS.forEach((c) => check(catalog.some((e) => e._id === c), `catalog: no entry for ${c}`));
+COLLECTIONS.forEach((c) => check(catalog.some((e) => e.collection === c), `catalog: no entry for ${c}`));
 
 print(`bank generated as of ${AS_OF.toISOString().slice(0, 10)}: ` + Object.entries(counts).map(([c, n]) => `${c}=${n}`).join(', ') + `, _catalog=${catalog.length}`);
 if (failures.length) {

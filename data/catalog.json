@@ -1,486 +1,1886 @@
 [
   {
     "_id": "_database",
-    "description": "Synthetic system of record for a commercial bank's client book across four lines of business (Corporate Banking, Commercial Lending, Capital Markets, Global Markets). Normalized: every child collection links to clients by clientId. This is the source data that widgets are built from.",
+    "description": "Synthetic system of record for a commercial bank's client book across four lines of business (Corporate Banking, Commercial Lending, Capital Markets, Global Markets). A property graph: every node belonging to a client is connected to its (:Client), and natural keys (clientId, holdingId, ...) stay on the nodes too. This is the source data that widgets are built from.",
     "conventions": [
-      "Each document's _id equals its business key (clientId, holdingId, ...). Join on the business key fields.",
-      "All money amounts are US dollars; their field names end in Usd.",
-      "All dates are UTC BSON dates. _meta.asOfDate is 'today' for this dataset; use it, not the wall clock, for 'YTD', 'overdue', 'next 90 days' and similar.",
-      "Revenue is booked monthly after month-end close: revenue_monthly holds the 24 closed months before asOfDate, so the current month is never present.",
-      "Fields that do not apply to a document are omitted, not null (for example drawnUsd only exists on credit holdings). Exception: precall_ collections mirror source workbooks, so a blank source value is stored as null.",
-      "precall_ collections hold KPI measures one per row (metricName verbatim, metricValue as supplied): filter on metricName and do not assume measures share a unit or scale.",
+      "Each node has a label (Client, Holding, ...) and keeps its natural key as a property (clientId, holdingId, ...), plus _id as the source system wrote it. Follow relationships to join; keys stay for display and filtering.",
+      "All money amounts are US dollars; their property names end in Usd.",
+      "All dates are UTC datetimes. (:_Meta).asOfDate is 'today' for this dataset; use $asOfDate (it is passed to every query), never date() or datetime() with no argument, for 'YTD', 'overdue', 'next 90 days' and similar.",
+      "Revenue is booked monthly after month-end close: (:RevenueMonth) holds the 24 closed months before asOfDate, so the current month is never present.",
+      "Properties that do not apply to a node are absent (for example drawnUsd only exists on credit holdings): n.drawnUsd is null there. Pre-call labels mirror source workbooks; a blank source value is also absent.",
+      "Pre-call KPI labels (RelationshipKpi, FinancialKpi) hold one measure per node (metricName verbatim, metricValue as supplied): filter on metricName and do not assume measures share a unit or scale.",
+      "Properties marked storage json hold nested records as a JSON string (Neo4j properties cannot nest); read them whole, they cannot be filtered on in Cypher.",
       "Values such as healthScore, walletSizeUsd and headroomPct are supplied by upstream bank systems. Metrics under derivedMetrics are not stored and must be computed."
     ],
-    "collections": {
-      "clients": "One row per client relationship (the anchor of Client 360).",
-      "products": "Reference list of every product the bank sells. Used for cross-sell whitespace.",
-      "holdings": "Products a client currently holds: facilities, deposit accounts, hedges, treasury services, completed capital markets mandates.",
-      "revenue_monthly": "Monthly revenue fact per holding: net interest income plus fees.",
-      "covenants": "Financial covenants on credit holdings, with the latest test result.",
-      "opportunities": "Sales pipeline: open and closed deals.",
-      "signals": "Detected risk, opportunity, service and market signals, and their triage stage.",
-      "contacts": "People at the client the bank deals with.",
-      "activities": "Interactions logged by the coverage team (meetings, calls, credit reviews, ...).",
-      "precall_company_profiles": "Pre-call brief: one company profile per client (firmographics as attributes). Parent of the other precall_ collections.",
-      "precall_citizens_products": "Pre-call brief: Citizens products the client holds, with balances, limits and revenue.",
-      "precall_citizens_coverage": "Pre-call brief: Citizens coverage bankers and their roles.",
-      "precall_citizens_relationship_kpis": "Pre-call brief: Citizens relationship profitability measures (RORC, ...) by as-of date, one measure per row.",
-      "precall_company_financial_kpis": "Pre-call brief: the company's financial measures (revenue, EBITDA, leverage, ...) by statement period, one measure per row.",
-      "precall_company_contacts": "Pre-call brief: contacts at the company as the source holds them, including former ones.",
-      "precall_company_event_history": "Pre-call brief: recorded events and interactions with free-text outcomes.",
-      "precall_company_risk_rating_history": "Pre-call brief: internal PD-risk rating history per legal entity."
+    "labels": {
+      "Client": "One row per client relationship (the anchor of Client 360).",
+      "Product": "Reference list of every product the bank sells. Used for cross-sell whitespace.",
+      "Holding": "Products a client currently holds: facilities, deposit accounts, hedges, treasury services, completed capital markets mandates.",
+      "RevenueMonth": "Monthly revenue fact per holding: net interest income plus fees.",
+      "Covenant": "Financial covenants on credit holdings, with the latest test result.",
+      "Opportunity": "Sales pipeline: open and closed deals.",
+      "Signal": "Detected risk, opportunity, service and market signals, and their triage stage.",
+      "Contact": "People at the client the bank deals with.",
+      "Activity": "Interactions logged by the coverage team (meetings, calls, credit reviews, ...).",
+      "CompanyProfile": "Pre-call brief: one company profile per client (firmographics as attributes). Parent of the other pre-call labels.",
+      "CitizensProduct": "Pre-call brief: Citizens products the client holds, with balances, limits and revenue.",
+      "CoverageBanker": "Pre-call brief: Citizens coverage bankers and their roles.",
+      "RelationshipKpi": "Pre-call brief: Citizens relationship profitability measures (RORC, ...) by as-of date, one measure per row.",
+      "FinancialKpi": "Pre-call brief: the company's financial measures (revenue, EBITDA, leverage, ...) by statement period, one measure per row.",
+      "CompanyContact": "Pre-call brief: contacts at the company as the source holds them, including former ones.",
+      "CompanyEvent": "Pre-call brief: recorded events and interactions with free-text outcomes.",
+      "RiskRating": "Pre-call brief: internal PD-risk rating history per legal entity.",
+      "Meeting": "Pre-call brief: meetings scheduled with the client in the next 45 days.",
+      "BalanceSnapshot": "Pre-call brief: the client's total drawn loans, loan commitments and deposit balances over the last 24 months: 23 month-ends plus today.",
+      "PaymentFlow": "Pre-call brief: the client's payments through Citizens accounts in the last 30 days, incoming and outgoing.",
+      "OwnershipStake": "Pre-call brief: who owns the company - institutional holders and float for public companies; sponsor, family or parent for private ones.",
+      "IndustryContext": "Pre-call brief: outlook and sector indicators per industry (the same industry list as clients.industry).",
+      "HyIssuer": "High Yield new issue: one row per bond issuer, with the company information shown on a deal's Transaction Details.",
+      "HyDeal": "High Yield new issue: one row per bond transaction - the rows of the New Issue calendar.",
+      "HyTranche": "High Yield new issue: one row per tranche (bond) of a deal, with its terms at issuance.",
+      "HyCapitalLayer": "High Yield new issue: the issuer's pro forma capital structure at the deal, one row per debt instrument in order of seniority, the new notes flagged, then a final cash row.",
+      "HyCovenant": "High Yield new issue: the incurrence covenant package on a deal's notes, one row per covenant.",
+      "HyAllocation": "High Yield new issue: final allocations of each priced tranche, by investor type and by investor region.",
+      "HyFeeEconomics": "High Yield new issue: underwriting fee economics of a deal - the gross spread, its components, and each bank's share, with Citizens' share pulled out."
     },
-    "joins": [
-      "clients.clientId 1 - n holdings.clientId, revenue_monthly.clientId, covenants.clientId, opportunities.clientId, signals.clientId, contacts.clientId, activities.clientId",
-      "products.productId 1 - n holdings.productId, opportunities.productId, revenue_monthly.productId",
-      "holdings.holdingId 1 - n revenue_monthly.holdingId, covenants.holdingId",
-      "covenants.covenantId 0..1 - n signals.covenantId",
-      "holdings.holdingId 0..1 - n signals.holdingId",
-      "opportunities.opportunityId 0..1 - n signals.opportunityId",
-      "contacts.contactId 0..1 - n activities.contactId",
-      "clients.clientId 1 - 1 precall_company_profiles.clientId; precall_company_profiles.clientId 1 - n every other precall_ collection's clientId"
+    "patterns": [
+      "(:Client)-[:HOLDS]->(:Holding) (each Holding has at most one Client)",
+      "(:Holding)-[:OF_PRODUCT]->(:Product) (each Holding has at most one Product)",
+      "(:RevenueMonth)-[:FOR_CLIENT]->(:Client) (each RevenueMonth has at most one Client)",
+      "(:Holding)-[:EARNED]->(:RevenueMonth) (each RevenueMonth has at most one Holding)",
+      "(:RevenueMonth)-[:OF_PRODUCT]->(:Product) (each RevenueMonth has at most one Product)",
+      "(:Covenant)-[:FOR_CLIENT]->(:Client) (each Covenant has at most one Client)",
+      "(:Holding)-[:HAS_COVENANT]->(:Covenant) (each Covenant has at most one Holding)",
+      "(:Client)-[:HAS_OPPORTUNITY]->(:Opportunity) (each Opportunity has at most one Client)",
+      "(:Opportunity)-[:FOR_PRODUCT]->(:Product) (each Opportunity has at most one Product)",
+      "(:Signal)-[:ABOUT]->(:Client) (each Signal has at most one Client)",
+      "(:Signal)-[:CONCERNS]->(:Holding) (each Signal has at most one Holding)",
+      "(:Signal)-[:CONCERNS]->(:Covenant) (each Signal has at most one Covenant)",
+      "(:Signal)-[:CONCERNS]->(:Opportunity) (each Signal has at most one Opportunity)",
+      "(:Contact)-[:WORKS_AT]->(:Client) (each Contact has at most one Client)",
+      "(:Activity)-[:FOR_CLIENT]->(:Client) (each Activity has at most one Client)",
+      "(:Activity)-[:WITH_CONTACT]->(:Contact) (each Activity has at most one Contact)",
+      "(:CompanyProfile)-[:PROFILE_OF]->(:Client) (each CompanyProfile has at most one Client)",
+      "(:CitizensProduct)-[:FOR_COMPANY]->(:CompanyProfile) (each CitizensProduct has at most one CompanyProfile)",
+      "(:CoverageBanker)-[:FOR_COMPANY]->(:CompanyProfile) (each CoverageBanker has at most one CompanyProfile)",
+      "(:RelationshipKpi)-[:FOR_COMPANY]->(:CompanyProfile) (each RelationshipKpi has at most one CompanyProfile)",
+      "(:FinancialKpi)-[:FOR_COMPANY]->(:CompanyProfile) (each FinancialKpi has at most one CompanyProfile)",
+      "(:CompanyContact)-[:FOR_COMPANY]->(:CompanyProfile) (each CompanyContact has at most one CompanyProfile)",
+      "(:CompanyEvent)-[:FOR_COMPANY]->(:CompanyProfile) (each CompanyEvent has at most one CompanyProfile)",
+      "(:RiskRating)-[:FOR_COMPANY]->(:CompanyProfile) (each RiskRating has at most one CompanyProfile)",
+      "(:HyIssuer)-[:IS_CLIENT]->(:Client) (each HyIssuer has at most one Client)",
+      "(:HyDeal)-[:ISSUED_BY]->(:HyIssuer) (each HyDeal has at most one HyIssuer)",
+      "(:HyDeal)-[:FOR_CLIENT]->(:Client) (each HyDeal has at most one Client)",
+      "(:HyDeal)-[:LEAD_TRANCHE]->(:HyTranche) (each HyDeal has at most one HyTranche)",
+      "(:HyTranche)-[:IN_DEAL]->(:HyDeal) (each HyTranche has at most one HyDeal)",
+      "(:HyTranche)-[:ISSUED_BY]->(:HyIssuer) (each HyTranche has at most one HyIssuer)",
+      "(:HyCapitalLayer)-[:IN_DEAL]->(:HyDeal) (each HyCapitalLayer has at most one HyDeal)",
+      "(:HyCapitalLayer)-[:IS_TRANCHE]->(:HyTranche) (each HyCapitalLayer has at most one HyTranche)",
+      "(:HyCovenant)-[:IN_DEAL]->(:HyDeal) (each HyCovenant has at most one HyDeal)",
+      "(:HyAllocation)-[:OF_TRANCHE]->(:HyTranche) (each HyAllocation has at most one HyTranche)",
+      "(:HyAllocation)-[:IN_DEAL]->(:HyDeal) (each HyAllocation has at most one HyDeal)",
+      "(:HyFeeEconomics)-[:FEES_OF]->(:HyDeal) (each HyFeeEconomics has at most one HyDeal)",
+      "(:Meeting)-[:FOR_CLIENT]->(:Client) (each Meeting has at most one Client)",
+      "(:Meeting)-[:DISCUSSES]->(:Opportunity) (each Meeting has at most one Opportunity)",
+      "(:BalanceSnapshot)-[:FOR_CLIENT]->(:Client) (each BalanceSnapshot has at most one Client)",
+      "(:PaymentFlow)-[:FOR_CLIENT]->(:Client) (each PaymentFlow has at most one Client)",
+      "(:OwnershipStake)-[:FOR_CLIENT]->(:Client) (each OwnershipStake has at most one Client)",
+      "(:Client)-[:IN_INDUSTRY]->(:IndustryContext) (each Client has at most one IndustryContext)"
     ]
   },
   {
-    "_id": "products",
+    "_id": "Product",
+    "collection": "products",
     "description": "Reference list of the bank's products, one row per product. Static.",
     "grain": "one row per product",
-    "primaryKey": "productId",
+    "key": "productId",
     "relationships": [],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as productId." },
-      { "name": "productId", "type": "string", "description": "Product key (kebab-case slug).", "example": "revolving-credit-facility" },
-      { "name": "name", "type": "string", "description": "Display name.", "example": "Revolving Credit Facility" },
-      { "name": "lob", "type": "string", "description": "Line of business that owns the product.", "allowedValues": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
-      { "name": "productType", "type": "string", "description": "Economic type. It decides which amount fields a holding has and how it earns revenue: credit (committedUsd/drawnUsd; NII on drawn plus commitment fees), deposit (balanceUsd; NII margin), treasury (fees only, no balance), markets (notionalUsd; trading fees), capital_markets (notionalUsd = deal size; one-off fee on completion).", "allowedValues": ["credit", "deposit", "treasury", "markets", "capital_markets"] },
-      { "name": "description", "type": "string", "description": "One-line plain-English description of the product." }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as productId."
+      },
+      {
+        "name": "productId",
+        "type": "string",
+        "description": "Product key (kebab-case slug).",
+        "example": "revolving-credit-facility"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Display name.",
+        "example": "Revolving Credit Facility"
+      },
+      {
+        "name": "lob",
+        "type": "string",
+        "description": "Line of business that owns the product.",
+        "allowedValues": [
+          "Corporate Banking",
+          "Commercial Lending",
+          "Capital Markets",
+          "Global Markets"
+        ]
+      },
+      {
+        "name": "productType",
+        "type": "string",
+        "description": "Economic type. It decides which amount fields a holding has and how it earns revenue: credit (committedUsd/drawnUsd; NII on drawn plus commitment fees), deposit (balanceUsd; NII margin), treasury (fees only, no balance), markets (notionalUsd; trading fees), capital_markets (notionalUsd = deal size; one-off fee on completion).",
+        "allowedValues": [
+          "credit",
+          "deposit",
+          "treasury",
+          "markets",
+          "capital_markets"
+        ]
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "description": "One-line plain-English description of the product."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "clients",
+    "_id": "Client",
+    "collection": "clients",
     "description": "Commercial banking clients: who they are, how they are covered, how risky they are. Bank economics (exposure, revenue, deposits, pipeline) are NOT stored here; derive them from holdings, revenue_monthly and opportunities.",
     "grain": "one row per client relationship",
-    "primaryKey": "clientId",
+    "key": "clientId",
     "relationships": [],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as clientId." },
-      { "name": "clientId", "type": "string", "description": "Client key.", "example": "CL-0001" },
-      { "name": "name", "type": "string", "description": "Client legal / display name.", "example": "Vantage Energy Corp" },
-      { "name": "industry", "type": "string", "description": "Industry sector. Use it to group peers.", "example": "Energy" },
-      { "name": "segment", "type": "string", "description": "Primary line of business that owns coverage of the client.", "allowedValues": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
-      { "name": "tier", "type": "string", "description": "Coverage tier by relationship size and importance.", "allowedValues": ["Strategic", "Core", "Growth"] },
-      { "name": "city", "type": "string", "description": "Headquarters city.", "example": "San Francisco" },
-      { "name": "country", "type": "string", "description": "Headquarters country.", "example": "USA" },
-      { "name": "region", "type": "string", "description": "Coverage region.", "allowedValues": ["AMER", "EMEA", "APAC", "LATAM"] },
-      { "name": "relationshipManager", "type": "string", "description": "Name of the relationship manager (also the 'Relationship Manager' entry in coverageTeam)." },
-      { "name": "coverageTeam", "type": "array<object>", "description": "Bankers covering the client: one per role.", "itemFields": [
-        { "name": "name", "type": "string", "description": "Banker name." },
-        { "name": "role", "type": "string", "allowedValues": ["Relationship Manager", "Treasury Officer", "Credit Officer", "Markets Specialist"] }
-      ] },
-      { "name": "internalRatingGrade", "type": "int", "description": "Internal risk rating grade, 1 (best) to 9 (worst).", "unit": "grade 1-9" },
-      { "name": "internalRatingLabel", "type": "string", "description": "Label for internalRatingGrade.", "allowedValues": ["Strong", "Satisfactory", "Acceptable", "Watch", "Substandard"] },
-      { "name": "externalRating", "type": "string", "description": "Agency-style long-term rating.", "allowedValues": ["AA", "AA-", "A", "A-", "BBB+", "BBB", "BBB-", "BB+", "BB"] },
-      { "name": "healthScore", "type": "int", "description": "Relationship health from the bank's relationship model, 0-100 (higher is better). It falls with covenant breaches, active P1 risk signals, overdue KYC and declining revenue. Usual bands: >=75 healthy, 50-74 watch, <50 at risk.", "unit": "score 0-100" },
-      { "name": "esgScore", "type": "int", "description": "ESG score from a third-party provider, 0-100 (higher is better).", "unit": "score 0-100" },
-      { "name": "annualRevenueUsd", "type": "number", "description": "The client's own annual revenue (company size), not revenue the bank earns.", "unit": "USD" },
-      { "name": "employees", "type": "int", "description": "The client's employee count." },
-      { "name": "walletSizeUsd", "type": "number", "description": "Estimated total annual banking spend of the client across all banks (its 'wallet'). Compare it with trailing-12-month revenue for share of wallet.", "unit": "USD per year" },
-      { "name": "kycStatus", "type": "string", "description": "Know-your-customer refresh status. Overdue blocks new business.", "allowedValues": ["Current", "Refresh Due", "Overdue"] },
-      { "name": "nextReviewDate", "type": "date", "description": "Next scheduled annual relationship / credit review." },
-      { "name": "relationshipSince", "type": "date", "description": "Date the client relationship started." }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as clientId."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Client key.",
+        "example": "CL-0001"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Client legal / display name.",
+        "example": "Vantage Energy Corp"
+      },
+      {
+        "name": "industry",
+        "type": "string",
+        "description": "Industry sector. Use it to group peers.",
+        "example": "Energy"
+      },
+      {
+        "name": "segment",
+        "type": "string",
+        "description": "Primary line of business that owns coverage of the client.",
+        "allowedValues": [
+          "Corporate Banking",
+          "Commercial Lending",
+          "Capital Markets",
+          "Global Markets"
+        ]
+      },
+      {
+        "name": "tier",
+        "type": "string",
+        "description": "Coverage tier by relationship size and importance.",
+        "allowedValues": [
+          "Strategic",
+          "Core",
+          "Growth"
+        ]
+      },
+      {
+        "name": "city",
+        "type": "string",
+        "description": "Headquarters city.",
+        "example": "San Francisco"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "description": "Headquarters country.",
+        "example": "USA"
+      },
+      {
+        "name": "region",
+        "type": "string",
+        "description": "Coverage region.",
+        "allowedValues": [
+          "AMER",
+          "EMEA",
+          "APAC",
+          "LATAM"
+        ]
+      },
+      {
+        "name": "relationshipManager",
+        "type": "string",
+        "description": "Name of the relationship manager (also the 'Relationship Manager' entry in coverageTeam)."
+      },
+      {
+        "name": "coverageTeam",
+        "type": "array<object>",
+        "description": "Bankers covering the client: one per role.",
+        "itemFields": [
+          {
+            "name": "name",
+            "type": "string",
+            "description": "Banker name."
+          },
+          {
+            "name": "role",
+            "type": "string",
+            "allowedValues": [
+              "Relationship Manager",
+              "Treasury Officer",
+              "Credit Officer",
+              "Markets Specialist"
+            ]
+          }
+        ],
+        "storage": "json"
+      },
+      {
+        "name": "internalRatingGrade",
+        "type": "int",
+        "description": "Internal risk rating grade, 1 (best) to 9 (worst).",
+        "unit": "grade 1-9"
+      },
+      {
+        "name": "internalRatingLabel",
+        "type": "string",
+        "description": "Label for internalRatingGrade.",
+        "allowedValues": [
+          "Strong",
+          "Satisfactory",
+          "Acceptable",
+          "Watch",
+          "Substandard"
+        ]
+      },
+      {
+        "name": "externalRating",
+        "type": "string",
+        "description": "Agency-style long-term rating.",
+        "allowedValues": [
+          "AA",
+          "AA-",
+          "A",
+          "A-",
+          "BBB+",
+          "BBB",
+          "BBB-",
+          "BB+",
+          "BB"
+        ]
+      },
+      {
+        "name": "healthScore",
+        "type": "int",
+        "description": "Relationship health from the bank's relationship model, 0-100 (higher is better). It falls with covenant breaches, active P1 risk signals, overdue KYC and declining revenue. Usual bands: >=75 healthy, 50-74 watch, <50 at risk.",
+        "unit": "score 0-100"
+      },
+      {
+        "name": "esgScore",
+        "type": "int",
+        "description": "ESG score from a third-party provider, 0-100 (higher is better).",
+        "unit": "score 0-100"
+      },
+      {
+        "name": "annualRevenueUsd",
+        "type": "number",
+        "description": "The client's own annual revenue (company size), not revenue the bank earns.",
+        "unit": "USD"
+      },
+      {
+        "name": "employees",
+        "type": "int",
+        "description": "The client's employee count."
+      },
+      {
+        "name": "walletSizeUsd",
+        "type": "number",
+        "description": "Estimated total annual banking spend of the client across all banks (its 'wallet'). Compare it with trailing-12-month revenue for share of wallet.",
+        "unit": "USD per year"
+      },
+      {
+        "name": "kycStatus",
+        "type": "string",
+        "description": "Know-your-customer refresh status. Overdue blocks new business.",
+        "allowedValues": [
+          "Current",
+          "Refresh Due",
+          "Overdue"
+        ]
+      },
+      {
+        "name": "nextReviewDate",
+        "type": "date",
+        "description": "Next scheduled annual relationship / credit review."
+      },
+      {
+        "name": "relationshipSince",
+        "type": "date",
+        "description": "Date the client relationship started."
+      }
     ],
     "derivedMetrics": [
-      { "name": "totalExposureUsd", "definition": "Sum of holdings.drawnUsd where productType = 'credit' for the client." },
-      { "name": "committedLimitUsd", "definition": "Sum of holdings.committedUsd where productType = 'credit' for the client." },
-      { "name": "utilization", "definition": "totalExposureUsd / committedLimitUsd (0-1). Above 0.9 on revolving lines is a warning sign." },
-      { "name": "depositsUsd", "definition": "Sum of holdings.balanceUsd where productType = 'deposit' for the client." },
-      { "name": "revenueYtdUsd", "definition": "Sum of revenue_monthly.totalUsd for the client with month in the calendar year of _meta.asOfDate." },
-      { "name": "revenuePriorYtdUsd", "definition": "Sum of revenue_monthly.totalUsd for the same months of the previous calendar year (January up to the latest closed month, one year earlier)." },
-      { "name": "revenueYoY", "definition": "(revenueYtdUsd - revenuePriorYtdUsd) / revenuePriorYtdUsd." },
-      { "name": "niiYtdUsd / feeYtdUsd", "definition": "Same as revenueYtdUsd, summing niiUsd or feeUsd instead of totalUsd." },
-      { "name": "revenueT12mUsd", "definition": "Sum of revenue_monthly.totalUsd over the 12 most recent closed months." },
-      { "name": "shareOfWallet", "definition": "revenueT12mUsd / clients.walletSizeUsd (0-1)." },
-      { "name": "walletGapUsd", "definition": "walletSizeUsd - revenueT12mUsd: revenue the client spends with other banks." },
-      { "name": "revenueByLob", "definition": "revenue_monthly grouped by lob (for example YTD or T12M)." },
-      { "name": "revenueTrendQuarterly", "definition": "revenue_monthly grouped by calendar quarter of month; the last 8 quarters cover the 24 months stored." },
-      { "name": "openPipelineUsd", "definition": "Sum of opportunities.expectedRevenueUsd where stage is not 'Closed Won' or 'Closed Lost'." },
-      { "name": "activeSignals", "definition": "Count of signals where stage != 'Resolved' (often split by severity)." },
-      { "name": "crossSellWhitespace", "definition": "products whose productId is not among the client's holdings.productId." },
-      { "name": "peerAverages", "definition": "Averages of a client metric over clients with the same industry (for example avg healthScore, avg shareOfWallet)." }
+      {
+        "name": "totalExposureUsd",
+        "definition": "Sum of holdings.drawnUsd where productType = 'credit' for the client."
+      },
+      {
+        "name": "committedLimitUsd",
+        "definition": "Sum of holdings.committedUsd where productType = 'credit' for the client."
+      },
+      {
+        "name": "utilization",
+        "definition": "totalExposureUsd / committedLimitUsd (0-1). Above 0.9 on revolving lines is a warning sign."
+      },
+      {
+        "name": "depositsUsd",
+        "definition": "Sum of holdings.balanceUsd where productType = 'deposit' for the client."
+      },
+      {
+        "name": "revenueYtdUsd",
+        "definition": "Sum of revenue_monthly.totalUsd for the client with month in the calendar year of _meta.asOfDate."
+      },
+      {
+        "name": "revenuePriorYtdUsd",
+        "definition": "Sum of revenue_monthly.totalUsd for the same months of the previous calendar year (January up to the latest closed month, one year earlier)."
+      },
+      {
+        "name": "revenueYoY",
+        "definition": "(revenueYtdUsd - revenuePriorYtdUsd) / revenuePriorYtdUsd."
+      },
+      {
+        "name": "niiYtdUsd / feeYtdUsd",
+        "definition": "Same as revenueYtdUsd, summing niiUsd or feeUsd instead of totalUsd."
+      },
+      {
+        "name": "revenueT12mUsd",
+        "definition": "Sum of revenue_monthly.totalUsd over the 12 most recent closed months."
+      },
+      {
+        "name": "shareOfWallet",
+        "definition": "revenueT12mUsd / clients.walletSizeUsd (0-1)."
+      },
+      {
+        "name": "walletGapUsd",
+        "definition": "walletSizeUsd - revenueT12mUsd: revenue the client spends with other banks."
+      },
+      {
+        "name": "revenueByLob",
+        "definition": "revenue_monthly grouped by lob (for example YTD or T12M)."
+      },
+      {
+        "name": "revenueTrendQuarterly",
+        "definition": "revenue_monthly grouped by calendar quarter of month; the last 8 quarters cover the 24 months stored."
+      },
+      {
+        "name": "openPipelineUsd",
+        "definition": "Sum of opportunities.expectedRevenueUsd where stage is not 'Closed Won' or 'Closed Lost'."
+      },
+      {
+        "name": "activeSignals",
+        "definition": "Count of signals where stage != 'Resolved' (often split by severity)."
+      },
+      {
+        "name": "crossSellWhitespace",
+        "definition": "products whose productId is not among the client's holdings.productId."
+      },
+      {
+        "name": "peerAverages",
+        "definition": "Averages of a client metric over clients with the same industry (for example avg healthScore, avg shareOfWallet)."
+      }
     ]
   },
   {
-    "_id": "holdings",
+    "_id": "Holding",
+    "collection": "holdings",
     "description": "Products each client holds with the bank, with their current amounts as of _meta.asOfDate. Which amount fields are present depends on productType.",
     "grain": "one row per client product holding (facility, account, hedge program, service or completed mandate)",
-    "primaryKey": "holdingId",
+    "key": "holdingId",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" },
-      { "field": "productId", "references": "products.productId" }
+      {
+        "type": "HOLDS",
+        "direction": "in",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Client)-[:HOLDS]->(:Holding)"
+      },
+      {
+        "type": "OF_PRODUCT",
+        "direction": "out",
+        "with": "Product",
+        "via": "productId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Holding)-[:OF_PRODUCT]->(:Product)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as holdingId." },
-      { "name": "holdingId", "type": "string", "description": "Holding key.", "example": "HL-00001" },
-      { "name": "clientId", "type": "string", "description": "Owning client." },
-      { "name": "productId", "type": "string", "description": "Product held." },
-      { "name": "productName", "type": "string", "description": "Copy of products.name, for display." },
-      { "name": "lob", "type": "string", "description": "Copy of products.lob.", "allowedValues": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
-      { "name": "productType", "type": "string", "description": "Copy of products.productType.", "allowedValues": ["credit", "deposit", "treasury", "markets", "capital_markets"] },
-      { "name": "status", "type": "string", "description": "Pending = approved but not yet funded or live (no revenue yet). Maturing = matures within 180 days of asOfDate. Completed = a capital_markets mandate that has closed (its fee is booked in the completion month).", "allowedValues": ["Active", "Pending", "Maturing", "Completed"] },
-      { "name": "openedDate", "type": "date", "description": "Date the holding was opened or funded. For capital_markets it is the deal completion date." },
-      { "name": "maturityDate", "type": "date", "description": "Contractual maturity. Present on credit and markets holdings only." },
-      { "name": "committedUsd", "type": "number", "description": "Committed facility limit. Present on credit holdings only.", "unit": "USD" },
-      { "name": "drawnUsd", "type": "number", "description": "Outstanding drawn balance (the credit exposure). Present on credit holdings only; always <= committedUsd.", "unit": "USD" },
-      { "name": "balanceUsd", "type": "number", "description": "Current deposit balance. Present on deposit holdings only.", "unit": "USD" },
-      { "name": "notionalUsd", "type": "number", "description": "Hedge notional (markets) or deal size (capital_markets). Not a balance-sheet amount.", "unit": "USD" }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as holdingId."
+      },
+      {
+        "name": "holdingId",
+        "type": "string",
+        "description": "Holding key.",
+        "example": "HL-00001"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Owning client."
+      },
+      {
+        "name": "productId",
+        "type": "string",
+        "description": "Product held."
+      },
+      {
+        "name": "productName",
+        "type": "string",
+        "description": "Copy of products.name, for display."
+      },
+      {
+        "name": "lob",
+        "type": "string",
+        "description": "Copy of products.lob.",
+        "allowedValues": [
+          "Corporate Banking",
+          "Commercial Lending",
+          "Capital Markets",
+          "Global Markets"
+        ]
+      },
+      {
+        "name": "productType",
+        "type": "string",
+        "description": "Copy of products.productType.",
+        "allowedValues": [
+          "credit",
+          "deposit",
+          "treasury",
+          "markets",
+          "capital_markets"
+        ]
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "description": "Pending = approved but not yet funded or live (no revenue yet). Maturing = matures within 180 days of asOfDate. Completed = a capital_markets mandate that has closed (its fee is booked in the completion month).",
+        "allowedValues": [
+          "Active",
+          "Pending",
+          "Maturing",
+          "Completed"
+        ]
+      },
+      {
+        "name": "openedDate",
+        "type": "date",
+        "description": "Date the holding was opened or funded. For capital_markets it is the deal completion date."
+      },
+      {
+        "name": "maturityDate",
+        "type": "date",
+        "description": "Contractual maturity. Present on credit and markets holdings only."
+      },
+      {
+        "name": "committedUsd",
+        "type": "number",
+        "description": "Committed facility limit. Present on credit holdings only.",
+        "unit": "USD"
+      },
+      {
+        "name": "drawnUsd",
+        "type": "number",
+        "description": "Outstanding drawn balance (the credit exposure). Present on credit holdings only; always <= committedUsd.",
+        "unit": "USD"
+      },
+      {
+        "name": "balanceUsd",
+        "type": "number",
+        "description": "Current deposit balance. Present on deposit holdings only.",
+        "unit": "USD"
+      },
+      {
+        "name": "notionalUsd",
+        "type": "number",
+        "description": "Hedge notional (markets) or deal size (capital_markets). Not a balance-sheet amount.",
+        "unit": "USD"
+      }
     ],
     "derivedMetrics": [
-      { "name": "utilization", "definition": "drawnUsd / committedUsd for a credit holding." },
-      { "name": "daysToMaturity", "definition": "maturityDate - _meta.asOfDate in days." }
+      {
+        "name": "utilization",
+        "definition": "drawnUsd / committedUsd for a credit holding."
+      },
+      {
+        "name": "daysToMaturity",
+        "definition": "maturityDate - _meta.asOfDate in days."
+      }
     ]
   },
   {
-    "_id": "revenue_monthly",
+    "_id": "RevenueMonth",
+    "collection": "revenue_monthly",
     "description": "Revenue the bank earned, per holding per closed month, for the 24 closed months before _meta.asOfDate. Months with zero revenue for a holding have no row. This is the source of every revenue figure: YTD, trend, by LOB, NII vs fees.",
     "grain": "one row per holding per month",
-    "primaryKey": "_id (holdingId + '-' + YYYY-MM)",
+    "key": "_id",
+    "keyDescription": "_id (holdingId + '-' + YYYY-MM)",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" },
-      { "field": "holdingId", "references": "holdings.holdingId" },
-      { "field": "productId", "references": "products.productId" }
+      {
+        "type": "FOR_CLIENT",
+        "direction": "out",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:RevenueMonth)-[:FOR_CLIENT]->(:Client)"
+      },
+      {
+        "type": "EARNED",
+        "direction": "in",
+        "with": "Holding",
+        "via": "holdingId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Holding)-[:EARNED]->(:RevenueMonth)"
+      },
+      {
+        "type": "OF_PRODUCT",
+        "direction": "out",
+        "with": "Product",
+        "via": "productId",
+        "cardinality": "many-to-one",
+        "pattern": "(:RevenueMonth)-[:OF_PRODUCT]->(:Product)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "holdingId + '-' + YYYY-MM.", "example": "HL-00001-2026-09" },
-      { "name": "clientId", "type": "string", "description": "Client that generated the revenue." },
-      { "name": "holdingId", "type": "string", "description": "Holding that generated the revenue." },
-      { "name": "productId", "type": "string", "description": "Product of the holding." },
-      { "name": "lob", "type": "string", "description": "Line of business credited with the revenue.", "allowedValues": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
-      { "name": "month", "type": "date", "description": "First day (UTC) of the revenue month." },
-      { "name": "niiUsd", "type": "number", "description": "Net interest income for the month (spread on loans, margin on deposits).", "unit": "USD" },
-      { "name": "feeUsd", "type": "number", "description": "Fee income for the month (commitment, arrangement, service, trading, underwriting and advisory fees).", "unit": "USD" },
-      { "name": "totalUsd", "type": "number", "description": "niiUsd + feeUsd.", "unit": "USD" }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "holdingId + '-' + YYYY-MM.",
+        "example": "HL-00001-2026-09"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Client that generated the revenue."
+      },
+      {
+        "name": "holdingId",
+        "type": "string",
+        "description": "Holding that generated the revenue."
+      },
+      {
+        "name": "productId",
+        "type": "string",
+        "description": "Product of the holding."
+      },
+      {
+        "name": "lob",
+        "type": "string",
+        "description": "Line of business credited with the revenue.",
+        "allowedValues": [
+          "Corporate Banking",
+          "Commercial Lending",
+          "Capital Markets",
+          "Global Markets"
+        ]
+      },
+      {
+        "name": "month",
+        "type": "date",
+        "description": "First day (UTC) of the revenue month."
+      },
+      {
+        "name": "niiUsd",
+        "type": "number",
+        "description": "Net interest income for the month (spread on loans, margin on deposits).",
+        "unit": "USD"
+      },
+      {
+        "name": "feeUsd",
+        "type": "number",
+        "description": "Fee income for the month (commitment, arrangement, service, trading, underwriting and advisory fees).",
+        "unit": "USD"
+      },
+      {
+        "name": "totalUsd",
+        "type": "number",
+        "description": "niiUsd + feeUsd.",
+        "unit": "USD"
+      }
     ],
     "derivedMetrics": [
-      { "name": "quarter", "definition": "Calendar quarter of month: year + '-Q' + ceil(monthNumber / 3)." }
+      {
+        "name": "quarter",
+        "definition": "Calendar quarter of month: year + '-Q' + ceil(monthNumber / 3)."
+      }
     ]
   },
   {
-    "_id": "covenants",
+    "_id": "Covenant",
+    "collection": "covenants",
     "description": "Financial covenants attached to credit holdings (Commercial Lending and Capital Markets loans), with the result of the latest quarterly test.",
     "grain": "one row per covenant on a credit holding",
-    "primaryKey": "covenantId",
+    "key": "covenantId",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" },
-      { "field": "holdingId", "references": "holdings.holdingId" }
+      {
+        "type": "FOR_CLIENT",
+        "direction": "out",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Covenant)-[:FOR_CLIENT]->(:Client)"
+      },
+      {
+        "type": "HAS_COVENANT",
+        "direction": "in",
+        "with": "Holding",
+        "via": "holdingId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Holding)-[:HAS_COVENANT]->(:Covenant)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as covenantId." },
-      { "name": "covenantId", "type": "string", "description": "Covenant key.", "example": "CV-0001" },
-      { "name": "clientId", "type": "string", "description": "Borrowing client." },
-      { "name": "holdingId", "type": "string", "description": "Credit facility the covenant belongs to." },
-      { "name": "name", "type": "string", "description": "Covenant name.", "allowedValues": ["Max Total Leverage", "Min Interest Coverage", "Min Fixed Charge Coverage", "Min Liquidity", "Max Loan-to-Value", "Min Debt Service Coverage"] },
-      { "name": "metric", "type": "string", "description": "Financial ratio or amount being tested.", "example": "Total Debt / EBITDA" },
-      { "name": "operator", "type": "string", "description": "Direction of the test: the actual must be <= or >= the threshold.", "allowedValues": ["<=", ">="] },
-      { "name": "threshold", "type": "number", "description": "Covenant limit, in unit." },
-      { "name": "actual", "type": "number", "description": "Value at the last test, in unit." },
-      { "name": "unit", "type": "string", "description": "Unit of threshold and actual: x = multiple, % = percent (70 means 70%), USD = dollars.", "allowedValues": ["x", "%", "USD"] },
-      { "name": "headroomPct", "type": "number", "description": "Distance from the limit in percent of the threshold. For <=: (threshold - actual) / threshold * 100. For >=: (actual - threshold) / threshold * 100. Negative means breached.", "unit": "percent" },
-      { "name": "status", "type": "string", "description": "Breach if headroomPct < 0, Watch if headroomPct < 15, otherwise Compliant.", "allowedValues": ["Compliant", "Watch", "Breach"] },
-      { "name": "testFrequency", "type": "string", "description": "How often the covenant is tested.", "allowedValues": ["Quarterly"] },
-      { "name": "lastTestDate", "type": "date", "description": "Quarter-end date of the latest test." }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as covenantId."
+      },
+      {
+        "name": "covenantId",
+        "type": "string",
+        "description": "Covenant key.",
+        "example": "CV-0001"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Borrowing client."
+      },
+      {
+        "name": "holdingId",
+        "type": "string",
+        "description": "Credit facility the covenant belongs to."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Covenant name.",
+        "allowedValues": [
+          "Max Total Leverage",
+          "Min Interest Coverage",
+          "Min Fixed Charge Coverage",
+          "Min Liquidity",
+          "Max Loan-to-Value",
+          "Min Debt Service Coverage"
+        ]
+      },
+      {
+        "name": "metric",
+        "type": "string",
+        "description": "Financial ratio or amount being tested.",
+        "example": "Total Debt / EBITDA"
+      },
+      {
+        "name": "operator",
+        "type": "string",
+        "description": "Direction of the test: the actual must be <= or >= the threshold.",
+        "allowedValues": [
+          "<=",
+          ">="
+        ]
+      },
+      {
+        "name": "threshold",
+        "type": "number",
+        "description": "Covenant limit, in unit."
+      },
+      {
+        "name": "actual",
+        "type": "number",
+        "description": "Value at the last test, in unit."
+      },
+      {
+        "name": "unit",
+        "type": "string",
+        "description": "Unit of threshold and actual: x = multiple, % = percent (70 means 70%), USD = dollars.",
+        "allowedValues": [
+          "x",
+          "%",
+          "USD"
+        ]
+      },
+      {
+        "name": "headroomPct",
+        "type": "number",
+        "description": "Distance from the limit in percent of the threshold. For <=: (threshold - actual) / threshold * 100. For >=: (actual - threshold) / threshold * 100. Negative means breached.",
+        "unit": "percent"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "description": "Breach if headroomPct < 0, Watch if headroomPct < 15, otherwise Compliant.",
+        "allowedValues": [
+          "Compliant",
+          "Watch",
+          "Breach"
+        ]
+      },
+      {
+        "name": "testFrequency",
+        "type": "string",
+        "description": "How often the covenant is tested.",
+        "allowedValues": [
+          "Quarterly"
+        ]
+      },
+      {
+        "name": "lastTestDate",
+        "type": "date",
+        "description": "Quarter-end date of the latest test."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "opportunities",
+    "_id": "Opportunity",
+    "collection": "opportunities",
     "description": "Sales pipeline across all lines of business: open deals and deals closed in the last year.",
     "grain": "one row per deal",
-    "primaryKey": "opportunityId",
+    "key": "opportunityId",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" },
-      { "field": "productId", "references": "products.productId" }
+      {
+        "type": "HAS_OPPORTUNITY",
+        "direction": "in",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Client)-[:HAS_OPPORTUNITY]->(:Opportunity)"
+      },
+      {
+        "type": "FOR_PRODUCT",
+        "direction": "out",
+        "with": "Product",
+        "via": "productId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Opportunity)-[:FOR_PRODUCT]->(:Product)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as opportunityId." },
-      { "name": "opportunityId", "type": "string", "description": "Deal key.", "example": "OP-00001" },
-      { "name": "clientId", "type": "string", "description": "Client the deal is with." },
-      { "name": "name", "type": "string", "description": "Deal name.", "example": "Vantage - Revolving Credit Facility (renewal / upsize)" },
-      { "name": "productId", "type": "string", "description": "Product being sold." },
-      { "name": "productName", "type": "string", "description": "Copy of products.name." },
-      { "name": "lob", "type": "string", "description": "Line of business of the product.", "allowedValues": ["Corporate Banking", "Commercial Lending", "Capital Markets", "Global Markets"] },
-      { "name": "stage", "type": "string", "description": "Sales stage. Open stages in order: Discovery, Proposal, Structuring, Credit Approval, Documentation, Closing.", "allowedValues": ["Discovery", "Proposal", "Structuring", "Credit Approval", "Documentation", "Closing", "Closed Won", "Closed Lost"] },
-      { "name": "probability", "type": "int", "description": "Win probability, fixed by stage: Discovery 10, Proposal 25, Structuring 40, Credit Approval 60, Documentation 80, Closing 90, Closed Won 100, Closed Lost 0.", "unit": "percent" },
-      { "name": "forecastCategory", "type": "string", "description": "Commit if probability >= 80, Best Case if >= 40, otherwise Pipeline; Closed for closed deals.", "allowedValues": ["Commit", "Best Case", "Pipeline", "Closed"] },
-      { "name": "dealSizeUsd", "type": "number", "description": "Facility size, notional or balance of the deal (annual contract value for treasury services). This is NOT revenue.", "unit": "USD" },
-      { "name": "expectedRevenueUsd", "type": "number", "description": "Expected first-year revenue to the bank if won. This is the pipeline value.", "unit": "USD" },
-      { "name": "closeDate", "type": "date", "description": "Expected close date (open deals) or actual close date (closed deals)." },
-      { "name": "originalCloseDate", "type": "date", "description": "Close date first forecast. Earlier than closeDate when the deal has slipped." },
-      { "name": "createdDate", "type": "date", "description": "Date the deal was opened." },
-      { "name": "owner", "type": "string", "description": "Banker who owns the deal." },
-      { "name": "riskLevel", "type": "string", "description": "Deal execution risk assessed by the owner.", "allowedValues": ["Low", "Medium", "High"] },
-      { "name": "daysInStage", "type": "int", "description": "Days since the deal entered its current stage (0 for closed deals)." },
-      { "name": "nextStep", "type": "string", "description": "Next action. Present on open deals only." },
-      { "name": "blockers", "type": "array<object>", "description": "Workstreams holding the deal up. May be empty.", "itemFields": [
-        { "name": "area", "type": "string", "allowedValues": ["Credit", "Legal", "KYC", "Pricing", "Procurement"] },
-        { "name": "status", "type": "string", "allowedValues": ["Blocked", "In Progress", "Not Started", "Cleared"] }
-      ] }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as opportunityId."
+      },
+      {
+        "name": "opportunityId",
+        "type": "string",
+        "description": "Deal key.",
+        "example": "OP-00001"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Client the deal is with."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Deal name.",
+        "example": "Vantage - Revolving Credit Facility (renewal / upsize)"
+      },
+      {
+        "name": "productId",
+        "type": "string",
+        "description": "Product being sold."
+      },
+      {
+        "name": "productName",
+        "type": "string",
+        "description": "Copy of products.name."
+      },
+      {
+        "name": "lob",
+        "type": "string",
+        "description": "Line of business of the product.",
+        "allowedValues": [
+          "Corporate Banking",
+          "Commercial Lending",
+          "Capital Markets",
+          "Global Markets"
+        ]
+      },
+      {
+        "name": "stage",
+        "type": "string",
+        "description": "Sales stage. Open stages in order: Discovery, Proposal, Structuring, Credit Approval, Documentation, Closing.",
+        "allowedValues": [
+          "Discovery",
+          "Proposal",
+          "Structuring",
+          "Credit Approval",
+          "Documentation",
+          "Closing",
+          "Closed Won",
+          "Closed Lost"
+        ]
+      },
+      {
+        "name": "probability",
+        "type": "int",
+        "description": "Win probability, fixed by stage: Discovery 10, Proposal 25, Structuring 40, Credit Approval 60, Documentation 80, Closing 90, Closed Won 100, Closed Lost 0.",
+        "unit": "percent"
+      },
+      {
+        "name": "forecastCategory",
+        "type": "string",
+        "description": "Commit if probability >= 80, Best Case if >= 40, otherwise Pipeline; Closed for closed deals.",
+        "allowedValues": [
+          "Commit",
+          "Best Case",
+          "Pipeline",
+          "Closed"
+        ]
+      },
+      {
+        "name": "dealSizeUsd",
+        "type": "number",
+        "description": "Facility size, notional or balance of the deal (annual contract value for treasury services). This is NOT revenue.",
+        "unit": "USD"
+      },
+      {
+        "name": "expectedRevenueUsd",
+        "type": "number",
+        "description": "Expected first-year revenue to the bank if won. This is the pipeline value.",
+        "unit": "USD"
+      },
+      {
+        "name": "closeDate",
+        "type": "date",
+        "description": "Expected close date (open deals) or actual close date (closed deals)."
+      },
+      {
+        "name": "originalCloseDate",
+        "type": "date",
+        "description": "Close date first forecast. Earlier than closeDate when the deal has slipped."
+      },
+      {
+        "name": "createdDate",
+        "type": "date",
+        "description": "Date the deal was opened."
+      },
+      {
+        "name": "owner",
+        "type": "string",
+        "description": "Banker who owns the deal."
+      },
+      {
+        "name": "riskLevel",
+        "type": "string",
+        "description": "Deal execution risk assessed by the owner.",
+        "allowedValues": [
+          "Low",
+          "Medium",
+          "High"
+        ]
+      },
+      {
+        "name": "daysInStage",
+        "type": "int",
+        "description": "Days since the deal entered its current stage (0 for closed deals)."
+      },
+      {
+        "name": "nextStep",
+        "type": "string",
+        "description": "Next action. Present on open deals only."
+      },
+      {
+        "name": "blockers",
+        "type": "array<object>",
+        "description": "Workstreams holding the deal up. May be empty.",
+        "itemFields": [
+          {
+            "name": "area",
+            "type": "string",
+            "allowedValues": [
+              "Credit",
+              "Legal",
+              "KYC",
+              "Pricing",
+              "Procurement"
+            ]
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "allowedValues": [
+              "Blocked",
+              "In Progress",
+              "Not Started",
+              "Cleared"
+            ]
+          }
+        ],
+        "storage": "json"
+      }
     ],
     "derivedMetrics": [
-      { "name": "isOpen", "definition": "stage is not 'Closed Won' or 'Closed Lost'." },
-      { "name": "slipped", "definition": "isOpen and closeDate < _meta.asOfDate (past due), or closeDate > originalCloseDate (pushed out)." },
-      { "name": "stalled", "definition": "isOpen and daysInStage > 45." },
-      { "name": "weightedPipelineUsd", "definition": "Sum of expectedRevenueUsd * probability / 100 over open deals." },
-      { "name": "winRate", "definition": "Closed Won count / (Closed Won + Closed Lost) count over a period." }
+      {
+        "name": "isOpen",
+        "definition": "stage is not 'Closed Won' or 'Closed Lost'."
+      },
+      {
+        "name": "slipped",
+        "definition": "isOpen and closeDate < _meta.asOfDate (past due), or closeDate > originalCloseDate (pushed out)."
+      },
+      {
+        "name": "stalled",
+        "definition": "isOpen and daysInStage > 45."
+      },
+      {
+        "name": "weightedPipelineUsd",
+        "definition": "Sum of expectedRevenueUsd * probability / 100 over open deals."
+      },
+      {
+        "name": "winRate",
+        "definition": "Closed Won count / (Closed Won + Closed Lost) count over a period."
+      }
     ]
   },
   {
-    "_id": "signals",
+    "_id": "Signal",
+    "collection": "signals",
     "description": "Signals detected about a client by bank systems (credit monitoring, payments flows, CRM, service desk, news, market data), with their triage stage. Some are linked to the holding, covenant or opportunity they concern.",
     "grain": "one row per detected signal",
-    "primaryKey": "signalId",
+    "key": "signalId",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" },
-      { "field": "holdingId", "references": "holdings.holdingId" },
-      { "field": "covenantId", "references": "covenants.covenantId" },
-      { "field": "opportunityId", "references": "opportunities.opportunityId" }
+      {
+        "type": "ABOUT",
+        "direction": "out",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Signal)-[:ABOUT]->(:Client)"
+      },
+      {
+        "type": "CONCERNS",
+        "direction": "out",
+        "with": "Holding",
+        "via": "holdingId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Signal)-[:CONCERNS]->(:Holding)"
+      },
+      {
+        "type": "CONCERNS",
+        "direction": "out",
+        "with": "Covenant",
+        "via": "covenantId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Signal)-[:CONCERNS]->(:Covenant)"
+      },
+      {
+        "type": "CONCERNS",
+        "direction": "out",
+        "with": "Opportunity",
+        "via": "opportunityId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Signal)-[:CONCERNS]->(:Opportunity)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as signalId." },
-      { "name": "signalId", "type": "string", "description": "Signal key.", "example": "SG-0001" },
-      { "name": "clientId", "type": "string", "description": "Client concerned." },
-      { "name": "category", "type": "string", "description": "Broad kind of signal.", "allowedValues": ["Risk", "Opportunity", "Service", "Market"] },
-      { "name": "type", "type": "string", "description": "Specific signal type.", "example": "Covenant" },
-      { "name": "severity", "type": "string", "description": "Urgency: P1 = act today, P2 = this week, P3 = informational.", "allowedValues": ["P1", "P2", "P3"] },
-      { "name": "title", "type": "string", "description": "One-line headline." },
-      { "name": "summary", "type": "string", "description": "Two-sentence explanation." },
-      { "name": "source", "type": "string", "description": "System that raised the signal.", "allowedValues": ["Credit monitoring", "Payments flows", "CRM", "Service desk", "News", "Market data"] },
-      { "name": "detectedAt", "type": "date", "description": "Detection timestamp (within 45 days before asOfDate)." },
-      { "name": "stage", "type": "string", "description": "Triage stage, in order New, Triaged, Engaged, Actioned, Resolved. Every stage except Resolved counts as active.", "allowedValues": ["New", "Triaged", "Engaged", "Actioned", "Resolved"] },
-      { "name": "confidence", "type": "int", "description": "Detection confidence, 0-100.", "unit": "percent" },
-      { "name": "impactUsd", "type": "number", "description": "Estimated dollars at stake: exposure at risk for Risk signals, revenue potential for Opportunity signals.", "unit": "USD" },
-      { "name": "owner", "type": "string", "description": "Banker responsible for the response." },
-      { "name": "holdingId", "type": "string", "description": "Holding the signal is about, if any." },
-      { "name": "covenantId", "type": "string", "description": "Covenant the signal is about, if any." },
-      { "name": "opportunityId", "type": "string", "description": "Related open opportunity, if any." },
-      { "name": "evidence", "type": "array<object>", "description": "Data points supporting the signal, preformatted for display.", "itemFields": [
-        { "name": "label", "type": "string" },
-        { "name": "value", "type": "string" }
-      ] },
-      { "name": "recommendedActions", "type": "array<string>", "description": "Suggested next best actions, in priority order." }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as signalId."
+      },
+      {
+        "name": "signalId",
+        "type": "string",
+        "description": "Signal key.",
+        "example": "SG-0001"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Client concerned."
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "description": "Broad kind of signal.",
+        "allowedValues": [
+          "Risk",
+          "Opportunity",
+          "Service",
+          "Market"
+        ]
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "description": "Specific signal type.",
+        "example": "Covenant"
+      },
+      {
+        "name": "severity",
+        "type": "string",
+        "description": "Urgency: P1 = act today, P2 = this week, P3 = informational.",
+        "allowedValues": [
+          "P1",
+          "P2",
+          "P3"
+        ]
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "description": "One-line headline."
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "Two-sentence explanation."
+      },
+      {
+        "name": "source",
+        "type": "string",
+        "description": "System that raised the signal.",
+        "allowedValues": [
+          "Credit monitoring",
+          "Payments flows",
+          "CRM",
+          "Service desk",
+          "News",
+          "Market data"
+        ]
+      },
+      {
+        "name": "detectedAt",
+        "type": "date",
+        "description": "Detection timestamp (within 45 days before asOfDate)."
+      },
+      {
+        "name": "stage",
+        "type": "string",
+        "description": "Triage stage, in order New, Triaged, Engaged, Actioned, Resolved. Every stage except Resolved counts as active.",
+        "allowedValues": [
+          "New",
+          "Triaged",
+          "Engaged",
+          "Actioned",
+          "Resolved"
+        ]
+      },
+      {
+        "name": "confidence",
+        "type": "int",
+        "description": "Detection confidence, 0-100.",
+        "unit": "percent"
+      },
+      {
+        "name": "impactUsd",
+        "type": "number",
+        "description": "Estimated dollars at stake: exposure at risk for Risk signals, revenue potential for Opportunity signals.",
+        "unit": "USD"
+      },
+      {
+        "name": "owner",
+        "type": "string",
+        "description": "Banker responsible for the response."
+      },
+      {
+        "name": "holdingId",
+        "type": "string",
+        "description": "Holding the signal is about, if any."
+      },
+      {
+        "name": "covenantId",
+        "type": "string",
+        "description": "Covenant the signal is about, if any."
+      },
+      {
+        "name": "opportunityId",
+        "type": "string",
+        "description": "Related open opportunity, if any."
+      },
+      {
+        "name": "evidence",
+        "type": "array<object>",
+        "description": "Data points supporting the signal, preformatted for display.",
+        "itemFields": [
+          {
+            "name": "label",
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "storage": "json"
+      },
+      {
+        "name": "recommendedActions",
+        "type": "array<string>",
+        "description": "Suggested next best actions, in priority order."
+      }
     ],
     "derivedMetrics": [
-      { "name": "isActive", "definition": "stage != 'Resolved'." }
+      {
+        "name": "isActive",
+        "definition": "stage != 'Resolved'."
+      }
     ]
   },
   {
-    "_id": "contacts",
+    "_id": "Contact",
+    "collection": "contacts",
     "description": "People at each client that the coverage team deals with.",
     "grain": "one row per client contact",
-    "primaryKey": "contactId",
+    "key": "contactId",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" }
+      {
+        "type": "WORKS_AT",
+        "direction": "out",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Contact)-[:WORKS_AT]->(:Client)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as contactId." },
-      { "name": "contactId", "type": "string", "description": "Contact key.", "example": "CT-00001" },
-      { "name": "clientId", "type": "string", "description": "Client the person works for." },
-      { "name": "name", "type": "string", "description": "Full name." },
-      { "name": "title", "type": "string", "description": "Job title.", "allowedValues": ["Chief Financial Officer", "Treasurer", "Controller", "Chief Executive Officer", "VP Corporate Development", "Head of Procurement"] },
-      { "name": "role", "type": "string", "description": "Role in the banking relationship.", "allowedValues": ["Decision Maker", "Treasury", "Finance", "Influencer"] },
-      { "name": "email", "type": "string", "description": "Work email (synthetic)." },
-      { "name": "isPrimary", "type": "bool", "description": "True for the primary contact (one per client)." },
-      { "name": "lastContactDate", "type": "date", "description": "Date of the most recent logged activity with this person." }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as contactId."
+      },
+      {
+        "name": "contactId",
+        "type": "string",
+        "description": "Contact key.",
+        "example": "CT-00001"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Client the person works for."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Full name."
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "description": "Job title.",
+        "allowedValues": [
+          "Chief Financial Officer",
+          "Treasurer",
+          "Controller",
+          "Chief Executive Officer",
+          "VP Corporate Development",
+          "Head of Procurement"
+        ]
+      },
+      {
+        "name": "role",
+        "type": "string",
+        "description": "Role in the banking relationship.",
+        "allowedValues": [
+          "Decision Maker",
+          "Treasury",
+          "Finance",
+          "Influencer"
+        ]
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "description": "Work email (synthetic)."
+      },
+      {
+        "name": "isPrimary",
+        "type": "bool",
+        "description": "True for the primary contact (one per client)."
+      },
+      {
+        "name": "lastContactDate",
+        "type": "date",
+        "description": "Date of the most recent logged activity with this person."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "activities",
+    "_id": "Activity",
+    "collection": "activities",
     "description": "Interactions logged by the coverage team over the 180 days before asOfDate.",
     "grain": "one row per logged interaction",
-    "primaryKey": "activityId",
+    "key": "activityId",
     "relationships": [
-      { "field": "clientId", "references": "clients.clientId" },
-      { "field": "contactId", "references": "contacts.contactId" }
+      {
+        "type": "FOR_CLIENT",
+        "direction": "out",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Activity)-[:FOR_CLIENT]->(:Client)"
+      },
+      {
+        "type": "WITH_CONTACT",
+        "direction": "out",
+        "with": "Contact",
+        "via": "contactId",
+        "cardinality": "many-to-one",
+        "pattern": "(:Activity)-[:WITH_CONTACT]->(:Contact)"
+      }
     ],
-    "fields": [
-      { "name": "_id", "type": "string", "description": "Same as activityId." },
-      { "name": "activityId", "type": "string", "description": "Activity key.", "example": "AC-00001" },
-      { "name": "clientId", "type": "string", "description": "Client concerned." },
-      { "name": "date", "type": "date", "description": "Date of the interaction." },
-      { "name": "type", "type": "string", "description": "Kind of interaction.", "allowedValues": ["Meeting", "Call", "Email", "Site Visit", "Credit Review"] },
-      { "name": "summary", "type": "string", "description": "One-line note of what happened." },
-      { "name": "owner", "type": "string", "description": "Banker who logged it." },
-      { "name": "contactId", "type": "string", "description": "Client contact involved. Absent for internal activities such as credit reviews." }
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Same as activityId."
+      },
+      {
+        "name": "activityId",
+        "type": "string",
+        "description": "Activity key.",
+        "example": "AC-00001"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Client concerned."
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "description": "Date of the interaction."
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "description": "Kind of interaction.",
+        "allowedValues": [
+          "Meeting",
+          "Call",
+          "Email",
+          "Site Visit",
+          "Credit Review"
+        ]
+      },
+      {
+        "name": "summary",
+        "type": "string",
+        "description": "One-line note of what happened."
+      },
+      {
+        "name": "owner",
+        "type": "string",
+        "description": "Banker who logged it."
+      },
+      {
+        "name": "contactId",
+        "type": "string",
+        "description": "Client contact involved. Absent for internal activities such as credit reviews."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_company_profiles",
+    "_id": "CompanyProfile",
+    "collection": "precall_company_profiles",
     "description": "Pre-call brief: one company profile per client, with its firmographics. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one document per client",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "clients.clientId"}
+      {
+        "type": "PROFILE_OF",
+        "direction": "out",
+        "with": "Client",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:CompanyProfile)-[:PROFILE_OF]->(:Client)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic document key: a company prefix and the source pr_id.", "example": "VANTAGE-12345"},
-      {"name": "clientId", "type": "string", "description": "Parent key for every precall_ child collection: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id."},
-      {"name": "companyName", "type": "string", "description": "Source pr_name."},
-      {"name": "privatePublicIndicator", "type": "string", "description": "Source private_public_ind; null when blank in the workbook - do not infer the company type.", "allowedValues": ["Public", "Private"]},
-      {"name": "attributes", "type": "object", "description": "Remaining firmographic attributes keyed by their source names (ticker, bank_role, NAICS, naics_description, employee_size, annual_revenue, hq_city, hq_country, MARKETCAP, HIGH_52_WEEK, PRICEHIGH, PRICINGDATE). Values keep their source meaning; public-market attributes are null for private companies."},
-      {"name": "sampleData", "type": "bool", "description": "Always true: synthetic seed."},
-      {"name": "sourceWorkbook", "type": "string", "description": "Name of the source workbook."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic document key: a company prefix and the source pr_id.",
+        "example": "VANTAGE-12345"
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent key for every precall_ child collection: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id."
+      },
+      {
+        "name": "companyName",
+        "type": "string",
+        "description": "Source pr_name."
+      },
+      {
+        "name": "privatePublicIndicator",
+        "type": "string",
+        "description": "Source private_public_ind; null when blank in the workbook - do not infer the company type.",
+        "allowedValues": [
+          "Public",
+          "Private"
+        ]
+      },
+      {
+        "name": "attributes",
+        "type": "object",
+        "description": "Remaining firmographic attributes keyed by their source names (ticker, bank_role, NAICS, naics_description, employee_size, annual_revenue, hq_city, hq_country, MARKETCAP, HIGH_52_WEEK, PRICEHIGH, PRICINGDATE). Values keep their source meaning; public-market attributes are null for private companies.",
+        "storage": "json"
+      },
+      {
+        "name": "sampleData",
+        "type": "bool",
+        "description": "Always true: synthetic seed."
+      },
+      {
+        "name": "sourceWorkbook",
+        "type": "string",
+        "description": "Name of the source workbook."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_citizens_products",
+    "_id": "CitizensProduct",
+    "collection": "precall_citizens_products",
     "description": "Pre-call brief: the Citizens products the client holds, one row per product, with balances and revenue. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per client per product",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:CitizensProduct)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
-      {"name": "partyCount", "type": "int", "description": "Source party_count: legal entities on the product."},
-      {"name": "product", "type": "string", "description": "Source product: the product name."},
-      {"name": "productCategory", "type": "string", "description": "Source product_category.", "allowedValues": ["Credit", "Deposits", "Treasury Management", "Global Markets", "Capital Markets"]},
-      {"name": "arrangementCount", "type": "int", "description": "Source arrangement_count: accounts or arrangements under the product."},
-      {"name": "totalBalance", "type": "number", "description": "Source total_balance: drawn for credit, balance for deposits, notional for markets and capital markets; null for fee-only products. Currency/units are not supplied in the worksheet."},
-      {"name": "creditLimit", "type": "number", "description": "Source credit_limit: committed amount, credit products only; grain and currency require business confirmation."},
-      {"name": "availableBalance", "type": "number", "description": "Source available_balance: undrawn commitment for credit, balance for deposits."},
-      {"name": "revenue", "type": "number", "description": "Source product revenue (trailing twelve months in this seed); period and currency require confirmation."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id, retained as a string."
+      },
+      {
+        "name": "partyCount",
+        "type": "int",
+        "description": "Source party_count: legal entities on the product."
+      },
+      {
+        "name": "product",
+        "type": "string",
+        "description": "Source product: the product name."
+      },
+      {
+        "name": "productCategory",
+        "type": "string",
+        "description": "Source product_category.",
+        "allowedValues": [
+          "Credit",
+          "Deposits",
+          "Treasury Management",
+          "Global Markets",
+          "Capital Markets"
+        ]
+      },
+      {
+        "name": "arrangementCount",
+        "type": "int",
+        "description": "Source arrangement_count: accounts or arrangements under the product."
+      },
+      {
+        "name": "totalBalance",
+        "type": "number",
+        "description": "Source total_balance: drawn for credit, balance for deposits, notional for markets and capital markets; null for fee-only products. Currency/units are not supplied in the worksheet."
+      },
+      {
+        "name": "creditLimit",
+        "type": "number",
+        "description": "Source credit_limit: committed amount, credit products only; grain and currency require business confirmation."
+      },
+      {
+        "name": "availableBalance",
+        "type": "number",
+        "description": "Source available_balance: undrawn commitment for credit, balance for deposits."
+      },
+      {
+        "name": "revenue",
+        "type": "number",
+        "description": "Source product revenue (trailing twelve months in this seed); period and currency require confirmation."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_citizens_coverage",
+    "_id": "CoverageBanker",
+    "collection": "precall_citizens_coverage",
     "description": "Pre-call brief: the Citizens employees covering the client and their coverage roles. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per employee per coverage assignment",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:CoverageBanker)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
-      {"name": "employeeTitle", "type": "string", "description": "Source employee_title."},
-      {"name": "employeeDivision", "type": "string", "description": "Source employee_division."},
-      {"name": "employeeName", "type": "string", "description": "Source employee_name."},
-      {"name": "employeeId", "type": "string", "description": "Source employee_id, retained as a string identifier."},
-      {"name": "email", "type": "string", "description": "Source email."},
-      {"name": "coverageRole", "type": "string", "description": "Source coverage_name."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id, retained as a string."
+      },
+      {
+        "name": "employeeTitle",
+        "type": "string",
+        "description": "Source employee_title."
+      },
+      {
+        "name": "employeeDivision",
+        "type": "string",
+        "description": "Source employee_division."
+      },
+      {
+        "name": "employeeName",
+        "type": "string",
+        "description": "Source employee_name."
+      },
+      {
+        "name": "employeeId",
+        "type": "string",
+        "description": "Source employee_id, retained as a string identifier."
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "description": "Source email."
+      },
+      {
+        "name": "coverageRole",
+        "type": "string",
+        "description": "Source coverage_name."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_citizens_relationship_kpis",
+    "_id": "RelationshipKpi",
+    "collection": "precall_citizens_relationship_kpis",
     "description": "Pre-call brief: Citizens relationship profitability measures, one row per measure per reporting date. This is Citizens' relationship economics, not the company's own financial performance. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per client per measure per as-of date (monthly, 24 months)",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:RelationshipKpi)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
-      {"name": "asOfDate", "type": "date", "description": "Source as_of_dt (month end)."},
-      {"name": "metricName", "type": "string", "description": "Source cpr_kpi_name, preserved verbatim. Measures are separate observations: do not treat net interest income as net interest margin, or assume all measures share a scale.", "allowedValues": ["RORC", "adj rorc", "net interest income - loans and leases", "fee income - loans"]},
-      {"name": "metricValue", "type": "number", "description": "Source cpr_kpi_value; no currency, scale or semantic conversion applied (RORC values are percents, income values are monthly USD)."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id, retained as a string."
+      },
+      {
+        "name": "asOfDate",
+        "type": "date",
+        "description": "Source as_of_dt (month end)."
+      },
+      {
+        "name": "metricName",
+        "type": "string",
+        "description": "Source cpr_kpi_name, preserved verbatim. Measures are separate observations: do not treat net interest income as net interest margin, or assume all measures share a scale.",
+        "allowedValues": [
+          "RORC",
+          "adj rorc",
+          "net interest income - loans and leases",
+          "fee income - loans"
+        ]
+      },
+      {
+        "name": "metricValue",
+        "type": "number",
+        "description": "Source cpr_kpi_value; no currency, scale or semantic conversion applied (RORC values are percents, income values are monthly USD)."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_company_financial_kpis",
+    "_id": "FinancialKpi",
+    "collection": "precall_company_financial_kpis",
     "description": "Pre-call brief: the company's financial measures from its spread statements, one row per measure per statement period. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per client per measure per statement (three fiscal years and the trailing twelve months)",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:FinancialKpi)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
-      {"name": "customerName", "type": "string", "description": "Source customer_nm."},
-      {"name": "source", "type": "string", "description": "Source source_of_the_data.", "example": "Credit Lense"},
-      {"name": "sourceCustomerId", "type": "string", "description": "Source customerid, retained as a string identifier."},
-      {"name": "statementType", "type": "string", "description": "Source statementtype.", "allowedValues": ["Annual", "TTM"]},
-      {"name": "statementYear", "type": "int", "description": "Source statementyear."},
-      {"name": "statementDate", "type": "date", "description": "Source statementdate."},
-      {"name": "metricName", "type": "string", "description": "Source financial_kpi_name, preserved verbatim.", "allowedValues": ["cashandequivs", "debt_to_ebitda_rt", "dio_sp_num", "dividendscommon", "dpo_sp_num", "dso_sp_num", "ebitda", "ebitda_to_int_exp_cpltd_rt", "grossprofit", "interestexpense", "netincome", "netcashfromoperativdirect", "revenue", "totaldebt", "totalopexpenses"]},
-      {"name": "metricValue", "type": "number", "description": "Source financial_kpi_value; no currency or scale conversion applied (amounts in USD, *_rt ratios as multiples, dso/dio/dpo in days). Null when missing in the source; zero only when the source says zero."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id, retained as a string."
+      },
+      {
+        "name": "customerName",
+        "type": "string",
+        "description": "Source customer_nm."
+      },
+      {
+        "name": "source",
+        "type": "string",
+        "description": "Source source_of_the_data.",
+        "example": "Credit Lense"
+      },
+      {
+        "name": "sourceCustomerId",
+        "type": "string",
+        "description": "Source customerid, retained as a string identifier."
+      },
+      {
+        "name": "statementType",
+        "type": "string",
+        "description": "Source statementtype.",
+        "allowedValues": [
+          "Annual",
+          "TTM"
+        ]
+      },
+      {
+        "name": "statementYear",
+        "type": "int",
+        "description": "Source statementyear."
+      },
+      {
+        "name": "statementDate",
+        "type": "date",
+        "description": "Source statementdate."
+      },
+      {
+        "name": "metricName",
+        "type": "string",
+        "description": "Source financial_kpi_name, preserved verbatim.",
+        "allowedValues": [
+          "cashandequivs",
+          "debt_to_ebitda_rt",
+          "dio_sp_num",
+          "dividendscommon",
+          "dpo_sp_num",
+          "dso_sp_num",
+          "ebitda",
+          "ebitda_to_int_exp_cpltd_rt",
+          "grossprofit",
+          "interestexpense",
+          "netincome",
+          "netcashfromoperativdirect",
+          "revenue",
+          "totaldebt",
+          "totalopexpenses"
+        ]
+      },
+      {
+        "name": "metricValue",
+        "type": "number",
+        "description": "Source financial_kpi_value; no currency or scale conversion applied (amounts in USD, *_rt ratios as multiples, dso/dio/dpo in days). Null when missing in the source; zero only when the source says zero."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_company_contacts",
+    "_id": "CompanyContact",
+    "collection": "precall_company_contacts",
     "description": "Pre-call brief: contacts at the company as the source holds them. Duplicate and historical rows are preserved (some are marked as no longer with the company); no de-duplication. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per source contact row",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:CompanyContact)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
-      {"name": "role", "type": "string", "description": "Source role; may be missing or a stale-status label such as 'No longer with company'."},
-      {"name": "firstName", "type": "string", "description": "Source first_name."},
-      {"name": "lastName", "type": "string", "description": "Source last_name."},
-      {"name": "email", "type": "string", "description": "Source email."},
-      {"name": "phone", "type": "string", "description": "Source phone."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id, retained as a string."
+      },
+      {
+        "name": "role",
+        "type": "string",
+        "description": "Source role; may be missing or a stale-status label such as 'No longer with company'."
+      },
+      {
+        "name": "firstName",
+        "type": "string",
+        "description": "Source first_name."
+      },
+      {
+        "name": "lastName",
+        "type": "string",
+        "description": "Source last_name."
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "description": "Source email."
+      },
+      {
+        "name": "phone",
+        "type": "string",
+        "description": "Source phone."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_company_event_history",
+    "_id": "CompanyEvent",
+    "collection": "precall_company_event_history",
     "description": "Pre-call brief: recorded client events and interactions, with free-text notes retained as records (not approved facts). Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per event or interaction",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:CompanyEvent)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "sourcePrId", "type": "string", "description": "Source pr_id: the workbook's client id, retained as a string."},
-      {"name": "eventDate", "type": "date", "description": "Source event_date."},
-      {"name": "channel", "type": "string", "description": "Source channel.", "allowedValues": ["Meeting", "Call", "Email", "Site Visit", "Credit Review"]},
-      {"name": "attendee", "type": "string", "description": "Source attendee: the client contact, null for internal events."},
-      {"name": "purpose", "type": "string", "description": "Source purpose."},
-      {"name": "outcome", "type": "string", "description": "Source outcome: often narrative text."},
-      {"name": "owner", "type": "string", "description": "Source owner: the banker."}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, a tag and a row number (e.g. VANTAGE-12345-PRD-0001)."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "sourcePrId",
+        "type": "string",
+        "description": "Source pr_id: the workbook's client id, retained as a string."
+      },
+      {
+        "name": "eventDate",
+        "type": "date",
+        "description": "Source event_date."
+      },
+      {
+        "name": "channel",
+        "type": "string",
+        "description": "Source channel.",
+        "allowedValues": [
+          "Meeting",
+          "Call",
+          "Email",
+          "Site Visit",
+          "Credit Review"
+        ]
+      },
+      {
+        "name": "attendee",
+        "type": "string",
+        "description": "Source attendee: the client contact, null for internal events."
+      },
+      {
+        "name": "purpose",
+        "type": "string",
+        "description": "Source purpose."
+      },
+      {
+        "name": "outcome",
+        "type": "string",
+        "description": "Source outcome: often narrative text."
+      },
+      {
+        "name": "owner",
+        "type": "string",
+        "description": "Source owner: the banker."
+      }
     ],
     "derivedMetrics": []
   },
   {
-    "_id": "precall_company_risk_rating_history",
+    "_id": "RiskRating",
+    "collection": "precall_company_risk_rating_history",
     "description": "Pre-call brief: internal PD-risk observations per legal entity and quarter. These are Citizens internal risk data, not agency ratings. Synthetic seed shaped like the bank's pre-call workbooks: values are held as the workbook holds them, not normalized; blank source values are null.",
     "grain": "one row per legal entity per measurement period (last six quarters)",
-    "primaryKey": "_id",
+    "key": "_id",
     "relationships": [
-      {"field": "clientId", "references": "precall_company_profiles.clientId"}
+      {
+        "type": "FOR_COMPANY",
+        "direction": "out",
+        "with": "CompanyProfile",
+        "via": "clientId",
+        "cardinality": "many-to-one",
+        "pattern": "(:RiskRating)-[:FOR_COMPANY]->(:CompanyProfile)"
+      }
     ],
-    "fields": [
-      {"name": "_id", "type": "string", "description": "Synthetic row key: the client's profile _id, RSK and a row number."},
-      {"name": "clientId", "type": "string", "description": "Parent profile key: clients.clientId."},
-      {"name": "measurementPeriod", "type": "date", "description": "Source MEASUREMENT_PERIOD_DT (quarter end)."},
-      {"name": "involvedPartyId", "type": "string", "description": "Source INVOLVED_PARTY_ID, retained as a string identifier."},
-      {"name": "primaryLegalEntityFlag", "type": "string", "description": "Source PRIMARY_LE_FLAG when supplied (clients with more than one rated entity); null otherwise.", "allowedValues": ["Y", "N"]},
-      {"name": "customerName", "type": "string", "description": "Source CUSTOMER_NM."},
-      {"name": "pdRatingCode", "type": "int", "description": "Source PD_RATING_CD: internal code (1 best - 9 worst), not an agency grade."},
-      {"name": "pdRatingDate", "type": "date", "description": "Source PD_RATING_DT."},
-      {"name": "defaultProbability", "type": "number", "description": "Source PDFT_FINAL_SET_POINT_ORA_RT: probability of default as a fraction, as supplied."},
-      {"name": "approvingEmployeeId", "type": "string", "description": "Source PD_APPROVING_EMPLOYEE_NUM: the approving credit officer (precall_citizens_coverage.employeeId)."},
-      {"name": "ratingSource", "type": "string", "description": "Source PD_RATING_SOURCE_CD.", "allowedValues": ["RMS", "Scorecard", "Override"]}
+    "properties": [
+      {
+        "name": "_id",
+        "type": "string",
+        "description": "Synthetic row key: the client's profile _id, RSK and a row number."
+      },
+      {
+        "name": "clientId",
+        "type": "string",
+        "description": "Parent profile key: clients.clientId."
+      },
+      {
+        "name": "measurementPeriod",
+        "type": "date",
+        "description": "Source MEASUREMENT_PERIOD_DT (quarter end)."
+      },
+      {
+        "name": "involvedPartyId",
+        "type": "string",
+        "description": "Source INVOLVED_PARTY_ID, retained as a string identifier."
+      },
+      {
+        "name": "primaryLegalEntityFlag",
+        "type": "string",
+        "description": "Source PRIMARY_LE_FLAG when supplied (clients with more than one rated entity); null otherwise.",
+        "allowedValues": [
+          "Y",
+          "N"
+        ]
+      },
+      {
+        "name": "customerName",
+        "type": "string",
+        "description": "Source CUSTOMER_NM."
+      },
+      {
+        "name": "pdRatingCode",
+        "type": "int",
+        "description": "Source PD_RATING_CD: internal code (1 best - 9 worst), not an agency grade."
+      },
+      {
+        "name": "pdRatingDate",
+        "type": "date",
+        "description": "Source PD_RATING_DT."
+      },
+      {
+        "name": "defaultProbability",
+        "type": "number",
+        "description": "Source PDFT_FINAL_SET_POINT_ORA_RT: probability of default as a fraction, as supplied."
+      },
+      {
+        "name": "approvingEmployeeId",
+        "type": "string",
+        "description": "Source PD_APPROVING_EMPLOYEE_NUM: the approving credit officer (precall_citizens_coverage.employeeId)."
+      },
+      {
+        "name": "ratingSource",
+        "type": "string",
+        "description": "Source PD_RATING_SOURCE_CD.",
+        "allowedValues": [
+          "RMS",
+          "Scorecard",
+          "Override"
+        ]
+      }
     ],
     "derivedMetrics": []
   }

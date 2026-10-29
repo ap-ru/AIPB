@@ -422,10 +422,10 @@ all('hy_tranches').forEach((t) => {
 
 // the dictionary must describe exactly the fields that exist
 COLLECTIONS.forEach((c) => {
-  const e = catalog.find((x) => x._id === c);
+  const e = catalog.find((x) => x.collection === c);
   check(!!e, `catalog-hy: no entry for ${c}`);
   if (!e) return;
-  const documented = new Set(e.fields.map((f) => f.name));
+  const documented = new Set(e.properties.map((f) => f.name));
   const observed = new Set(bank.getCollection(c).aggregate([
     { $project: { kv: { $objectToArray: '$$ROOT' } } }, { $unwind: '$kv' }, { $group: { _id: '$kv.k' } },
   ]).toArray().map((d) => d._id));
