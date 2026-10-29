@@ -200,6 +200,6 @@ class QuerySpecTest {
                 n++;
             }
         }
-        assertThat(n).isEqualTo(12);
+        assertThat(n).isEqualTo(13);
     }
 }

@@ -118,4 +118,28 @@ class GraphSourceLiveTest {
         rows.forEach(r -> { var o = out.addObject(); for (String n : names) o.set(n, r.get(n)); });
         return out;
     }
+
+    @Test
+    void theSignalTrailFollowsTheGraphToTheProduct() throws Exception {
+        var executor = new com.aipb.semantic.QueryExecutor(com.aipb.semantic.SemanticModel.fromClasspath(mapper), graph);
+        // independently: each signal's product, following the relationships by hand
+        Map<String, String> want = new HashMap<>();
+        graph.cypher("""
+                MATCH (s:Signal) WHERE s.clientId = $c
+                OPTIONAL MATCH (s)-[:CONCERNS]->(x)
+                OPTIONAL MATCH (x)-[:OF_PRODUCT|FOR_PRODUCT]->(p1:Product)
+                OPTIONAL MATCH (x)<-[:HAS_COVENANT]-(:Holding)-[:OF_PRODUCT]->(p2:Product)
+                RETURN s.signalId AS id, s.title AS title, coalesce(p1.name, p2.name) AS product""", Map.of("c", "CL-0017"))
+                .documents().forEach(d -> want.put(d.path("title").asText(), d.path("product").asText(null)));
+        assertThat(want).isNotEmpty();
+        var r = executor.execute(mapper.readValue("{\"kind\": \"records\", \"model\": \"signals\", \"fields\": [\"title\", \"concerns\", \"trailProduct\"], \"limit\": 200}",
+                com.aipb.semantic.SemanticQuery.class), "CL-0017");
+        assertThat(r.rows().size()).isEqualTo(want.size());
+        int traced = 0;
+        for (JsonNode row : r.rows()) {
+            assertThat(row.path("trailProduct").asText(null)).as(row.path("title").asText()).isEqualTo(want.get(row.path("title").asText()));
+            if (!row.path("concerns").isNull()) traced++;
+        }
+        assertThat(traced).as("signals that trace to something").isPositive();
+    }
 }

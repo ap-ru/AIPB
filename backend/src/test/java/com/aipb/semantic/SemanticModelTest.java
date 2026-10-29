@@ -82,7 +82,7 @@ class SemanticModelTest {
         SemanticModelValidator.checkExpr(holdings, com.fasterxml.jackson.databind.node.TextNode.valueOf("m.drawnUsd"), List.of("Holding.drawnUsd"), "z", out);
         assertThat(out).anyMatch(p -> p.startsWith("x") && p.contains("n.secretUsd"))
                 .anyMatch(p -> p.startsWith("y") && p.contains("parameters"))
-                .anyMatch(p -> p.startsWith("z") && p.contains("only the model's node n"));
+                .anyMatch(p -> p.startsWith("z") && p.contains("only the model's node n and its joins"));
     }
 
     @Test

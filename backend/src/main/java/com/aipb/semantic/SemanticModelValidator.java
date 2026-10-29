@@ -64,9 +64,11 @@ public final class SemanticModelValidator {
         m.joins().forEach((name, j) -> {
             if (sm.dimension(name) != null && !sm.dimension(name).id().equals(name)) out.add(at + ": join '" + name + "' clashes with a dimension");
             if (!IDENT.matcher(name).matches() || name.equals("n")) out.add(at + ": join name '" + name + "' must be a plain identifier other than n");
-            if (j.rel() == null || !IDENT.matcher(j.rel()).matches() || j.node() == null || !IDENT.matcher(j.node()).matches()
-                    || !Set.of("in", "out").contains(j.dir()))
-                out.add(at + ": join '" + name + "' needs rel, dir (in or out) and node");
+            if (j.hops().isEmpty()) out.add(at + ": join '" + name + "' needs rel, dir and node, or a path of them");
+            for (Model.Hop h : j.hops())
+                if (h.rel() == null || !IDENT.matcher(h.rel()).matches() || h.node() == null || !IDENT.matcher(h.node()).matches()
+                        || !Set.of("in", "out").contains(h.dir()))
+                    out.add(at + ": join '" + name + "' needs rel, dir (in or out) and node on every hop");
         });
         m.dimensions().forEach((dim, b) -> {
             Dimension d = sm.dimension(dim);
@@ -121,8 +123,9 @@ public final class SemanticModelValidator {
     }
 
     /**
-     * An expression is a Cypher expression over the model's node {@code n}: text, no clauses or parameters, and every
-     * property it reads ({@code n.x}) declared in its sources ({@code Label.x}), so lineage is never wrong.
+     * An expression is a Cypher expression over the model's node {@code n} and its joins: text, no clauses or
+     * parameters, and every property it reads ({@code n.x}, {@code join.x}) declared in its sources ({@code Label.x}),
+     * so lineage is never wrong.
      */
     static void checkExpr(Model m, JsonNode expr, List<String> sources, String at, List<String> out) {
         if (!expr.isTextual() || expr.asText().isBlank()) { out.add(at + ": expr must be a Cypher expression over n (text)"); return; }
@@ -134,9 +137,10 @@ public final class SemanticModelValidator {
         if (code.matches("(?is).*\\b(MATCH|RETURN|UNWIND|CALL)\\b.*")) out.add(at + ": expr is one expression, not a query");
         Matcher r = PROPERTY_REF.matcher(code);
         while (r.find()) {
-            if (!r.group(1).equals("n")) { out.add(at + ": expr reads '" + r.group(1) + "." + r.group(2) + "'; an expr reads only the model's node n"); continue; }
-            if (!sources.contains(m.node() + "." + r.group(2)))
-                out.add(at + ": expr reads n." + r.group(2) + ", which is not in its sources (" + m.node() + "." + r.group(2) + ")");
+            String label = r.group(1).equals("n") ? m.node() : m.joins().containsKey(r.group(1)) ? m.joins().get(r.group(1)).node() : null;
+            if (label == null) { out.add(at + ": expr reads '" + r.group(1) + "." + r.group(2) + "'; an expr reads only the model's node n and its joins"); continue; }
+            if (!sources.contains(label + "." + r.group(2)))
+                out.add(at + ": expr reads " + r.group(1) + "." + r.group(2) + ", which is not in its sources (" + label + "." + r.group(2) + ")");
         }
     }
 
@@ -224,14 +228,20 @@ public final class SemanticModelValidator {
             JsonNode entry = entries.get(m.node());
             if (entry == null) { out.add(at + ": label '" + m.node() + "' is not in the data dictionary"); continue; }
             m.joins().forEach((name, j) -> {
-                if (!entries.containsKey(j.node())) { out.add(at + " join " + name + ": label '" + j.node() + "' is not in the data dictionary"); return; }
-                String pattern = "in".equals(j.dir()) ? "(:" + j.node() + ")-[:" + j.rel() + "]->(:" + m.node() + ")" : "(:" + m.node() + ")-[:" + j.rel() + "]->(:" + j.node() + ")";
-                JsonNode rel = null;
-                for (JsonNode r : entry.path("relationships"))
-                    if (r.path("type").asText().equals(j.rel()) && r.path("with").asText().equals(j.node()) && r.path("direction").asText().equals(j.dir())) rel = r;
-                if (rel == null) out.add(at + " join " + name + ": the dictionary has no relationship " + pattern);
-                else if (!"many-to-one".equals(rel.path("cardinality").asText()))
-                    out.add(at + " join " + name + ": " + pattern + " is " + rel.path("cardinality").asText() + ", so the join could multiply rows");
+                // each hop must be many-to-one from where it starts; the dictionary records a relationship on the label it
+                // is many-to-one from (a hop the other way round reads the other label's entry, reversed)
+                String from = m.node();
+                for (Model.Hop h : j.hops()) {
+                    if (!entries.containsKey(h.node())) { out.add(at + " join " + name + ": label '" + h.node() + "' is not in the data dictionary"); return; }
+                    String pattern = "in".equals(h.dir()) ? "(:" + h.node() + ")-[:" + h.rel() + "]->(:" + from + ")" : "(:" + from + ")-[:" + h.rel() + "]->(:" + h.node() + ")";
+                    JsonNode rel = null;
+                    for (JsonNode r : entries.get(from).path("relationships"))
+                        if (r.path("type").asText().equals(h.rel()) && r.path("with").asText().equals(h.node()) && r.path("direction").asText().equals(h.dir())) rel = r;
+                    if (rel == null) out.add(at + " join " + name + ": the dictionary has no relationship " + pattern);
+                    else if (!"many-to-one".equals(rel.path("cardinality").asText()))
+                        out.add(at + " join " + name + ": " + pattern + " is " + rel.path("cardinality").asText() + ", so the join could multiply rows");
+                    from = h.node();
+                }
             });
             if (m.entity() != null) field(entries, m, m.entity(), at + " entity", out);
             if (m.time() != null) field(entries, m, m.time().field(), at + " time", out);

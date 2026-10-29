@@ -1,0 +1,67 @@
+{
+  "id": "client-signal-trail",
+  "specVersion": 2,
+  "version": 1,
+  "title": "Signal trail",
+  "description": "The selected client's unresolved risk signals, each traced through the graph to the covenant, holding or deal it concerns and the product behind it.",
+  "data": {
+    "query": {
+      "kind": "records",
+      "model": "signals",
+      "segments": [
+        "active",
+        "risk"
+      ],
+      "fields": [
+        "title",
+        "severity",
+        "concerns",
+        "trailProduct",
+        "covenantHeadroomPct",
+        "detectedAt"
+      ],
+      "sort": [
+        {
+          "by": "severity",
+          "dir": "asc"
+        },
+        {
+          "by": "detectedAt",
+          "dir": "desc"
+        }
+      ],
+      "limit": 10,
+      "scope": "entity"
+    },
+    "columns": [
+      {
+        "name": "severity",
+        "tones": {
+          "P1": "bad",
+          "P2": "warn",
+          "P3": "info"
+        }
+      }
+    ]
+  },
+  "view": {
+    "primitive": "table",
+    "columns": [
+      "title",
+      "severity",
+      "concerns",
+      "trailProduct",
+      "covenantHeadroomPct",
+      "detectedAt"
+    ]
+  },
+  "layout": {
+    "span": 12
+  },
+  "provenance": {
+    "author": "starter",
+    "sampleParams": {
+      "clientId": "CL-0017"
+    }
+  }
+}

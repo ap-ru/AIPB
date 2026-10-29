@@ -1,12 +1,22 @@
 {
   "id": "signals",
   "label": "Signals",
-  "version": 1,
-  "description": "Risk, opportunity, service and market signals detected about clients, with their triage stage.",
+  "version": 2,
+  "description": "Risk, opportunity, service and market signals detected about clients, with their triage stage, and what each traces to: the holding, covenant or deal it concerns and, through it, the product.",
   "node": "Signal",
   "entity": "clientId",
   "entityJoin": { "rel": "ABOUT", "dir": "out" },
   "time": { "field": "detectedAt", "grain": "month", "closedOnly": false },
+  "joins": {
+    "holding": { "rel": "CONCERNS", "dir": "out", "node": "Holding" },
+    "covenant": { "rel": "CONCERNS", "dir": "out", "node": "Covenant" },
+    "deal": { "rel": "CONCERNS", "dir": "out", "node": "Opportunity" },
+    "covenantFacility": { "path": [{ "rel": "CONCERNS", "dir": "out", "node": "Covenant" }, { "rel": "HAS_COVENANT", "dir": "in", "node": "Holding" }] },
+    "holdingProduct": { "path": [{ "rel": "CONCERNS", "dir": "out", "node": "Holding" }, { "rel": "OF_PRODUCT", "dir": "out", "node": "Product" }] },
+    "covenantProduct": { "path": [{ "rel": "CONCERNS", "dir": "out", "node": "Covenant" }, { "rel": "HAS_COVENANT", "dir": "in", "node": "Holding" },
+                                  { "rel": "OF_PRODUCT", "dir": "out", "node": "Product" }] },
+    "dealProduct": { "path": [{ "rel": "CONCERNS", "dir": "out", "node": "Opportunity" }, { "rel": "FOR_PRODUCT", "dir": "out", "node": "Product" }] }
+  },
   "dimensions": {
     "signalCategory": "category",
     "signalType": "type",
@@ -46,7 +56,17 @@
       { "id": "detectedAt", "label": "Detected", "field": "detectedAt", "type": "date", "unit": "date" },
       { "id": "impactUsd", "label": "Impact", "field": "impactUsd", "type": "number", "unit": "USD" },
       { "id": "owner", "label": "Owner", "field": "owner", "type": "string" },
-      { "id": "summary", "label": "Summary", "field": "summary", "type": "string" }
+      { "id": "summary", "label": "Summary", "field": "summary", "type": "string" },
+      { "id": "concerns", "label": "Concerns", "type": "string",
+        "expr": "CASE WHEN covenant.name IS NOT NULL THEN 'Covenant: ' + covenant.name + ' on ' + covenantFacility.productName WHEN holding.productName IS NOT NULL THEN 'Holding: ' + holding.productName WHEN deal.name IS NOT NULL THEN 'Deal: ' + deal.name END",
+        "sources": ["Covenant.name", "Holding.productName", "Opportunity.name"],
+        "description": "What the signal traces to in the graph: the covenant (and its facility), holding or deal it concerns; empty for a signal about the client as a whole." },
+      { "id": "trailProduct", "label": "Product", "type": "string",
+        "expr": "coalesce(holdingProduct.name, covenantProduct.name, dealProduct.name)", "sources": ["Product.name"],
+        "description": "The product the signal traces to, through its holding, its covenant's facility or its deal." },
+      { "id": "trailLob", "label": "Line of business", "type": "string",
+        "expr": "coalesce(holdingProduct.lob, covenantProduct.lob, dealProduct.lob)", "sources": ["Product.lob"] },
+      { "id": "covenantHeadroomPct", "label": "Covenant headroom", "field": "covenant.headroomPct", "type": "number", "unit": "percent" }
     ],
     "defaultSort": [{ "by": "severity", "dir": "asc" }, { "by": "detectedAt", "dir": "desc" }]
   }

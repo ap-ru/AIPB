@@ -165,8 +165,14 @@ public final class SemanticModel {
                 List.copyOf(measures), records);
     }
 
+    /** {rel, dir, node} for one hop, or {path: [{rel, dir, node}, ...]} for several. */
     private static Model.Join join(JsonNode j) {
-        return new Model.Join(j.path("rel").asText(), j.path("dir").asText("out"), text(j, "node"));
+        if (j.has("path")) {
+            List<Model.Hop> hops = new ArrayList<>();
+            j.get("path").forEach(h -> hops.add(new Model.Hop(h.path("rel").asText(), h.path("dir").asText("out"), text(h, "node"))));
+            return new Model.Join(List.copyOf(hops));
+        }
+        return Model.Join.of(j.path("rel").asText(), j.path("dir").asText("out"), text(j, "node"));
     }
 
     /**
@@ -184,7 +190,7 @@ public final class SemanticModel {
         for (Model m : models.values()) {
             if (m.entityModel() || m.entity() == null || m.entityJoin() == null) { out.put(m.id(), m); continue; }
             Map<String, Model.Join> joins = new LinkedHashMap<>(m.joins());
-            joins.putIfAbsent(joinName, new Model.Join(m.entityJoin().rel(), m.entityJoin().dir(), entity.node()));
+            joins.putIfAbsent(joinName, Model.Join.of(m.entityJoin().rel(), m.entityJoin().dir(), entity.node()));
             Map<String, Model.Binding> bindings = new LinkedHashMap<>(m.dimensions());
             entity.dimensions().forEach((dim, b) -> bindings.putIfAbsent(dim, b.field().equals(entity.entity())
                     ? new Model.Binding(m.entity(), b.display() == null ? null : joinName + "." + b.display())

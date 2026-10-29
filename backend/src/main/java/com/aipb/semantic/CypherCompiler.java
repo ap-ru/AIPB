@@ -13,7 +13,8 @@ import java.util.regex.Pattern;
  * semantic queries, so every widget computes a metric the same way. Shape:
  * <pre>
  * MATCH (n:Label) WHERE  (entity scope, filters and segments on the node's own properties, the date range)
- * OPTIONAL MATCH (n)-[:REL]-(join:Label), per join a path needs (many-to-one: never multiplies rows)
+ * OPTIONAL MATCH (n)-[:REL]-(join:Label), per join a path or expression needs - one or more hops, each
+ *                many-to-one, so it never multiplies rows
  * WITH n, join... WHERE  (conditions through a join)
  * aggregate: RETURN the dimensions (implicit grouping keys) and one aggregation per measure (CASE WHEN for its segments)
  * records:   RETURN the fields, ORDER BY (nulls first ascending, as MongoDB sorted), LIMIT
@@ -28,6 +29,7 @@ public final class CypherCompiler {
     static final String DISPLAY_SUFFIX = "__display";
     static final String NODE = "n";
     private static final Pattern IDENT = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+    private static final Pattern JOIN_REF = Pattern.compile("(?<![\\w.$])([A-Za-z_]\\w*)\\s*\\.\\s*[A-Za-z_]");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private CypherCompiler() {}
@@ -55,6 +57,8 @@ public final class CypherCompiler {
         q.conditions().forEach(x -> paths.add(x.field()));
         q.aggs().forEach(a -> { if (a.measure().field() != null) paths.add(a.measure().field()); });
         for (String p : paths) { String j = joinOf(m, p); if (j != null) joins.add(j); }
+        q.aggs().forEach(a -> { if (a.measure().expr() != null) joins.addAll(exprJoins(m, a.measure().expr())); });
+        if (q.fields() != null) q.fields().forEach(f -> { if (f.expr() != null) joins.addAll(exprJoins(m, f.expr())); });
 
         List<String> pre = new ArrayList<>(), post = new ArrayList<>();
         for (Condition x : q.conditions())
@@ -70,9 +74,14 @@ public final class CypherCompiler {
         if (!pre.isEmpty()) c.append("\nWHERE ").append(String.join(" AND ", pre));
         for (String name : joins) {
             Model.Join j = m.joins().get(name);
-            String rel = "-[:" + ident(j.rel()) + "]-";
-            c.append("\nOPTIONAL MATCH (").append(NODE).append(')').append("in".equals(j.dir()) ? "<" + rel : rel + ">")
-                    .append('(').append(ident(name)).append(':').append(ident(j.node())).append(')');
+            c.append("\nOPTIONAL MATCH (").append(NODE).append(')');
+            for (int i = 0; i < j.hops().size(); i++) {
+                Model.Hop h = j.hops().get(i);
+                String rel = "-[:" + ident(h.rel()) + "]-";
+                c.append("in".equals(h.dir()) ? "<" + rel : rel + ">").append('(');
+                if (i == j.hops().size() - 1) c.append(ident(name));
+                c.append(':').append(ident(h.node())).append(')');
+            }
         }
         if (!post.isEmpty()) {
             List<String> carried = new ArrayList<>(List.of(NODE));
@@ -154,7 +163,15 @@ public final class CypherCompiler {
         return dot > 0 && m.joins().containsKey(p.substring(0, dot)) ? p.substring(0, dot) : null;
     }
 
-    /** A model expression: Cypher over the model's node {@code n}, checked by the model validator. */
+    /** The joins an expression reads ({@code join.prop}), in order of appearance. */
+    static List<String> exprJoins(Model m, JsonNode e) {
+        List<String> out = new ArrayList<>();
+        java.util.regex.Matcher r = JOIN_REF.matcher(com.aipb.source.ReadOnlyCypher.code(e.asText()));
+        while (r.find()) if (m.joins().containsKey(r.group(1)) && !out.contains(r.group(1))) out.add(r.group(1));
+        return out;
+    }
+
+    /** A model expression: Cypher over the model's node {@code n} and its joins, checked by the model validator. */
     private static String expr(JsonNode e) { return "(" + e.asText() + ")"; }
 
     private static String grain(String g) {

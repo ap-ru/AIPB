@@ -40,7 +40,9 @@ async function main() {
   const entries = catalog.filter((e) => e.collection);
 
   // ---------------------------------------------------------------- wipe
-  await run('MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS');
+  // CALL ... IN TRANSACTIONS needs an auto-commit transaction (session.run), not executeQuery's managed one
+  const wipe = driver.session({ database: env('NEO4J_DATABASE', 'neo4j') });
+  try { await wipe.run('MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS'); } finally { await wipe.close(); }
 
   // ---------------------------------------------------------------- constraints and indexes
   for (const e of entries) {

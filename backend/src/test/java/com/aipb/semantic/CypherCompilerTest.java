@@ -50,6 +50,7 @@ class CypherCompilerTest {
         CASES.put("win-rate", new Object[]{"{\"metrics\": [\"winRate\", \"productsHeld\"]}", BOOK});
         CASES.put("covenants-records", new Object[]{"{\"kind\": \"records\", \"model\": \"covenants\", \"fields\": [\"name\", \"facility\", \"actual\", \"threshold\", \"headroomPct\", \"status\"]}", CLIENT});
         CASES.put("active-signals-records", new Object[]{"{\"kind\": \"records\", \"model\": \"signals\", \"segments\": [\"active\"], \"fields\": [\"title\", \"subtitle\", \"severity\", \"detectedAt\"], \"limit\": 10}", CLIENT});
+        CASES.put("signal-trail-records", new Object[]{"{\"kind\": \"records\", \"model\": \"signals\", \"segments\": [\"active\", \"risk\"], \"fields\": [\"title\", \"concerns\", \"trailProduct\", \"covenantHeadroomPct\"], \"limit\": 10}", CLIENT});
         CASES.put("maturing-holdings-records", new Object[]{"{\"kind\": \"records\", \"model\": \"holdings\", \"window\": {\"type\": \"next\", \"unit\": \"day\", \"n\": 90, \"on\": \"maturity\"}, \"fields\": [\"productName\", \"amountUsd\", \"maturityDate\"], \"sort\": [{\"by\": \"maturityDate\", \"dir\": \"asc\"}]}", BOOK});
     }
 
@@ -134,5 +135,15 @@ class CypherCompilerTest {
                 + "\"sort\": [{\"by\": \"maturityDate\", \"dir\": \"asc\"}], \"limit\": 5}"), CLIENT);
         String c = CypherCompiler.compile(plan.queries().get(0)).cypher();
         assertThat(c).contains("ORDER BY maturityDate IS NULL DESC, maturityDate, n.holdingId").endsWith("LIMIT $limit");
+    }
+
+    @Test
+    void aMultiHopJoinFollowsEveryHopAndOnlyTheJoinsAFieldNeeds() {
+        QueryPlanner.Plan plan = planner.plan(q("{\"kind\": \"records\", \"model\": \"signals\", \"fields\": [\"title\", \"trailProduct\"]}"), CLIENT);
+        String c = CypherCompiler.compile(plan.queries().get(0)).cypher();
+        assertThat(c).contains("OPTIONAL MATCH (n)-[:CONCERNS]->(:Covenant)<-[:HAS_COVENANT]-(:Holding)-[:OF_PRODUCT]->(covenantProduct:Product)")
+                .contains("OPTIONAL MATCH (n)-[:CONCERNS]->(:Holding)-[:OF_PRODUCT]->(holdingProduct:Product)")
+                .contains("(coalesce(holdingProduct.name, covenantProduct.name, dealProduct.name)) AS trailProduct")
+                .doesNotContain("covenantFacility").doesNotContain("(covenant:Covenant)");
     }
 }

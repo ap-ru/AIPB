@@ -22,10 +22,23 @@ public record Model(String id, String label, int version, String description, St
     public record TimeSpec(String field, String grain, boolean closedOnly) {}
 
     /**
-     * A many-to-one hop: relationship {@code rel} from this model's node ({@code dir} out: {@code (n)-[:rel]->(x)}, in:
-     * {@code (n)<-[:rel]-(x)}) to a node labelled {@code node}. The entity join's {@code node} is the entity model's.
+     * A many-to-one path from this model's node to a node labelled {@code node}: one or more hops, each a relationship
+     * {@code rel} ({@code dir} out: {@code (a)-[:rel]->(b)}, in: {@code (a)<-[:rel]-(b)}) that is many-to-one from its
+     * start, so the whole path is too. The entity join's {@code node} is the entity model's.
      */
-    public record Join(String rel, String dir, String node) {}
+    public record Join(List<Hop> hops) {
+        public static Join of(String rel, String dir, String node) { return new Join(List.of(new Hop(rel, dir, node))); }
+
+        /** The label at the end of the path. */
+        public String node() { return hops.isEmpty() ? null : hops.get(hops.size() - 1).node(); }
+
+        public String rel() { return hops.isEmpty() ? null : hops.get(0).rel(); }
+
+        public String dir() { return hops.isEmpty() ? null : hops.get(0).dir(); }
+    }
+
+    /** One relationship of a join's path. */
+    public record Hop(String rel, String dir, String node) {}
 
     /** Where a dimension lives in this model: its value path, and for keyed dimensions the path of its label. */
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -115,7 +115,7 @@ public final class Defaults {
                 spec("client-active-signals", "Active signals", 5),
                 spec("client-open-opportunities", "Open opportunities", 8),
                 spec("client-contacts", "Key contacts", 4));
-        client.getParams().add(param("clientId", "Client", "clients", "clientId", "name"));
+        client.getParams().add(param("clientId", "Client", "Client", "clientId", "name"));
         l.getPages().add(client);
         return l;
     }
